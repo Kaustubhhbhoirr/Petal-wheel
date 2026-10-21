@@ -22,3 +22,16 @@ Response:
 
 The worker writes only to the `output` path it was given. The core owns the final name (collision rule
 `name (1).ext`) and renames the temp file only after a successful response.
+
+## Supervisor (`core/src/supervisor.rs`)
+
+1. Create a Job Object: job memory cap, `BELOW_NORMAL` priority, hard CPU rate cap,
+   `DIE_ON_UNHANDLED_EXCEPTION` and `KILL_ON_JOB_CLOSE` (nothing survives the core).
+2. Spawn the worker with `CREATE_SUSPENDED`, assign it to the job, then resume its thread, so it
+   never runs a single instruction outside the limits.
+3. Wait on the job's I/O completion port. `JOB_MEMORY_LIMIT` means too heavy; `ACTIVE_PROCESS_ZERO`
+   means done. The wall-clock limit and Cancel are enforced by `TerminateJobObject`, which also kills
+   any processes the worker started.
+4. stdout is capped at 1 MiB and stderr keeps its last 8 KiB, so a chatty worker cannot grow the core.
+
+Tested against `flick-misbehave` (memory bomb, infinite loop, child that spins, crash, garbage output).

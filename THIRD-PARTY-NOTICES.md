@@ -8,6 +8,7 @@ before each release (see SPEC.md section 11).
 | [Tauri](https://github.com/tauri-apps/tauri) | core | MIT OR Apache-2.0 | The Tauri Programme within The Commons Conservancy |
 | [serde](https://github.com/serde-rs/serde), [serde_json](https://github.com/serde-rs/json) | core, workers | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
 | [lopdf](https://github.com/J-F-Liu/lopdf) | pdf-light worker | MIT | Junfeng Liu and contributors |
+| [windows-rs](https://github.com/microsoft/windows-rs) | core | MIT OR Apache-2.0 | Microsoft Corporation |
 | [anyhow](https://github.com/dtolnay/anyhow), [thiserror](https://github.com/dtolnay/thiserror) | core, workers | MIT OR Apache-2.0 | David Tolnay |
 
 Transitive Rust dependencies can be listed with `cargo tree` and audited with
