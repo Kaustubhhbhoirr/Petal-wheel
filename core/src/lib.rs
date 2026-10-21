@@ -10,3 +10,15 @@ pub mod hotkey;
 
 #[cfg(windows)]
 pub mod selection;
+
+pub mod wheel;
+
+#[cfg(windows)]
+pub mod overlay;
+
+pub mod jobs;
+
+pub mod log;
+
+#[cfg(windows)]
+pub mod controller;

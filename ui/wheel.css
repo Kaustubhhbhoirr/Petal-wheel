@@ -1,0 +1,24 @@
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  cursor: default;
+}
+
+svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+}
+
+.backdrop { fill: rgba(20, 20, 26, 0.88); }
+.slice { fill: rgba(255, 255, 255, 0.08); }
+.slice.hover { fill: rgba(124, 196, 255, 0.92); }
+.label { fill: #f2f2f2; font-size: 12.5px; text-anchor: middle; dominant-baseline: central; }
+.label.disabled { fill: rgba(242, 242, 242, 0.4); }
+.label.hover { fill: #0b1520; }
+.caption { fill: #f2f2f2; font-size: 13.5px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
