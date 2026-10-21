@@ -35,3 +35,14 @@ The worker writes only to the `output` path it was given. The core owns the fina
 4. stdout is capped at 1 MiB and stderr keeps its last 8 KiB, so a chatty worker cannot grow the core.
 
 Tested against `flick-misbehave` (memory bomb, infinite loop, child that spins, crash, garbage output).
+
+## Explorer selection (`core/src/selection.rs`)
+
+The window in front is captured when the hotkey fires. If its root is `CabinetWClass` (Explorer) the
+matching `IShellWindows` entry is found by HWND; on Windows 11 several tabs share that HWND, so the
+entry whose `IShellBrowser::GetWindow` equals the visible `ShellTabWindowClass` child wins. For
+`Progman`/`WorkerW` the Desktop browser comes from `FindWindowSW(CSIDL_DESKTOP, SWC_DESKTOP)`. The
+selection is read with `IFolderView::Items(SVGIO_SELECTION)`; items without a file system path are
+counted as skipped. COM runs on a short-lived STA thread per read.
+
+Probe: `cargo run -p flick-core --example selection_probe [-- --foreground 3]`.

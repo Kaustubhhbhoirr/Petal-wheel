@@ -7,3 +7,6 @@
 pub mod supervisor;
 
 pub mod hotkey;
+
+#[cfg(windows)]
+pub mod selection;
