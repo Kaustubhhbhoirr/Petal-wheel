@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["core", "workers/pdf-light"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+authors = ["Kaustubh Bhoir"]
+repository = "https://github.com/Kaustubhhbhoirr/flick-wheel"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

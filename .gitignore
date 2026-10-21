@@ -1,0 +1,6 @@
+/target
+**/target
+node_modules/
+*.pdb
+/core/gen/
+.DS_Store
