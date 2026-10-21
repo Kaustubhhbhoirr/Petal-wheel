@@ -62,3 +62,7 @@ cargo run -p flick-core
 
 [AGPL-3.0](LICENSE). Third-party components and their licenses are listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+## Acknowledgements
+
+Built by Kaustubh Bhoir, with help from Claude (Anthropic) as a coding assistant.
