@@ -5,3 +5,5 @@
 
 #[cfg(windows)]
 pub mod supervisor;
+
+pub mod hotkey;
