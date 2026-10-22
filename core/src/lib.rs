@@ -35,3 +35,7 @@ pub mod toast;
 
 #[cfg(windows)]
 pub mod settings;
+
+pub mod theme;
+
+pub mod icons;

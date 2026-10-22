@@ -50,6 +50,13 @@ section, footer {
   margin-top: 12px;
 }
 
+/* Save and Close stay in view however long the page gets. */
+footer {
+  position: sticky;
+  bottom: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
 p { margin: 0 0 8px; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; margin: 6px 0 0; }
@@ -104,6 +111,32 @@ button.link { border: none; color: var(--accent); padding: 6px 4px; }
 .list .meta { color: var(--muted); font-size: 12px; }
 .list button { padding: 2px 9px; }
 .list input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+.theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.theme:hover { border-color: var(--accent); }
+.theme:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.theme input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.theme .grow { flex: 1; min-width: 0; }
+.theme .name { font-weight: 600; }
+.theme .meta { color: var(--muted); font-size: 12px; }
+.swatches { display: flex; }
+.swatches span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--card);
+  margin-left: -6px;
+}
+@media (max-width: 520px) { .themes { grid-template-columns: minmax(0, 1fr); } }
 
 .errors { list-style: none; margin: 8px 0 0; padding: 0; }
 .errors li {

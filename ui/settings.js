@@ -6,7 +6,55 @@ let saved = null;     // settings as loaded / last saved
 let shortcut = "";    // shortcut being edited
 let shortcutOk = true;
 let slices = [];      // [{ id, label, pack, enabled, applies }] in display order
+let theme = "";       // selected theme id
 let recording = false;
+
+const STYLE_NAMES = { orbit: "Buttons on an orbit", pie: "Pie", ring: "Slim ring" };
+
+function renderThemes(view) {
+  const box = $("themes");
+  box.replaceChildren();
+  for (const t of view.themes) {
+    const label = document.createElement("label");
+    label.className = "theme";
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "theme";
+    radio.value = t.id;
+    radio.checked = t.id === theme;
+    radio.addEventListener("change", () => { theme = t.id; refreshSave(); });
+
+    const text = document.createElement("div");
+    text.className = "grow";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = t.name;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = STYLE_NAMES[t.style] || t.style;
+    text.append(name, meta);
+
+    const swatches = document.createElement("div");
+    swatches.className = "swatches";
+    swatches.setAttribute("aria-hidden", "true");
+    for (const color of t.swatches) {
+      const dot = document.createElement("span");
+      dot.style.background = color;
+      swatches.append(dot);
+    }
+
+    label.append(radio, text, swatches);
+    box.append(label);
+  }
+  const errors = $("theme-errors");
+  errors.replaceChildren();
+  for (const error of view.theme_errors) {
+    const li = document.createElement("li");
+    li.textContent = `${error.file}: ${error.message}`;
+    errors.append(li);
+  }
+}
 
 // KeyboardEvent.code -> the key names core/src/hotkey.rs understands.
 function keyName(code) {
@@ -42,6 +90,7 @@ function dirty() {
   const ids = (list) => list.map((s) => s.id).join("|");
   const off = (list) => list.filter((s) => !s.enabled).map((s) => s.id).join("|");
   return shortcut !== saved.shortcut
+    || theme !== saved.theme
     || ids(slices) !== ids(saved.slices)
     || off(slices) !== off(saved.slices);
 }
@@ -148,10 +197,12 @@ async function load() {
   shortcut = view.shortcut;
   shortcutOk = true;
   slices = view.slices.map((s) => ({ ...s }));
+  theme = view.theme;
   $("version").textContent = "v" + view.version;
   renderShortcut();
   renderSlices();
   renderPacks(view);
+  renderThemes(view);
   if (view.shortcut_active) {
     setStatus($("shortcut-status"), "");
   } else {
@@ -224,6 +275,7 @@ $("save").addEventListener("click", async () => {
       shortcut,
       order: slices.map((s) => s.id),
       disabled: slices.filter((s) => !s.enabled).map((s) => s.id),
+      theme,
     });
     await load();
     setStatus($("save-status"), "Saved.", "ok");

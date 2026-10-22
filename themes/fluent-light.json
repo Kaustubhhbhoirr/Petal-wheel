@@ -1,0 +1,16 @@
+{
+  "id": "fluent-light",
+  "name": "Fluent light",
+  "style": "pie",
+  "colors": {
+    "accent": "#0067c0",
+    "on_accent": "#ffffff",
+    "surface": "#f6f7f9",
+    "slice": "#eceef2",
+    "centre": "#ffffff",
+    "text": "#1f2328",
+    "muted": "#5c5f66",
+    "outline": "#ffffff",
+    "shadow": "#1b2a3a47"
+  }
+}

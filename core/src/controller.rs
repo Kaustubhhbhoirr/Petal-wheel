@@ -22,6 +22,7 @@ use crate::overlay::{Overlay, Placement, WheelContent};
 use crate::packs::Catalog;
 use crate::selection::{foreground_window, selected_paths, Selection};
 use crate::supervisor::CancelToken;
+use crate::theme::{pick, Theme};
 use crate::toast::{Toast, Toaster};
 use crate::wheel::{hit_test, Slice};
 
@@ -32,6 +33,8 @@ const TRACK_INTERVAL: Duration = Duration::from_millis(16);
 pub struct Shared {
     pub catalog: RwLock<Catalog>,
     pub config: RwLock<Config>,
+    /// Installed wheel themes; always holds at least the built-in default.
+    pub themes: Vec<Theme>,
 }
 
 pub struct Controller {
@@ -88,18 +91,23 @@ impl Controller {
             Selection::default()
         });
         let selection_ms = ms(started.elapsed());
-        let slices: Vec<Slice> = {
+        let (slices, theme) = {
             let catalog = self.shared.catalog.read().unwrap();
             let config = self.shared.config.read().unwrap();
-            catalog
+            let slices: Vec<Slice> = catalog
                 .slices_for(&selection.paths, &config.slices)
                 .into_iter()
                 .map(Slice::from)
-                .collect()
+                .collect();
+            (
+                slices,
+                Arc::new(pick(&self.shared.themes, &config.theme).clone()),
+            )
         };
         let content = WheelContent {
             caption: caption(&selection, slices.is_empty()),
             slices: slices.clone(),
+            theme,
         };
         let placement = Placement {
             x: centre.x,

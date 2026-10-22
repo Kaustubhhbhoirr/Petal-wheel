@@ -12,6 +12,8 @@ use crate::hotkey::Shortcut;
 pub struct Config {
     /// The shortcut that opens the wheel, e.g. "Ctrl+Alt+Space".
     pub shortcut: String,
+    /// Id of the wheel theme, e.g. "orbit" (see `themes/`).
+    pub theme: String,
     pub slices: SliceConfig,
 }
 
@@ -29,6 +31,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             shortcut: Shortcut::default().to_string(),
+            theme: crate::theme::DEFAULT_THEME.to_string(),
             slices: SliceConfig::default(),
         }
     }
@@ -102,6 +105,7 @@ mod tests {
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
             shortcut: "Ctrl+Shift+F12".into(),
+            theme: "slim-ring".into(),
             slices: SliceConfig {
                 order: vec!["pdf-light.merge".into()],
                 disabled: vec!["pdf-light.split".into()],
