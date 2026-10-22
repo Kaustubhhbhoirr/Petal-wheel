@@ -2,8 +2,9 @@
 
 Select a file, press a shortcut, flick to an action. No uploads, no ads, no subscriptions, no internet.
 
-> **Status:** v0.1 spike. This proves the risky parts (hotkey, Explorer selection, wheel overlay,
-> sandboxed workers) before features are built. Not ready for daily use yet.
+> **Status:** v0.1 spike. Hold-to-open, Explorer selection, the native wheel and a sandboxed PDF
+> merge work end to end on Windows 11; the measurements are in
+> [docs/spike-results.md](docs/spike-results.md). Not ready for daily use yet.
 
 ## How it works
 
@@ -36,8 +37,9 @@ A frozen or crashing conversion only kills its own worker. The core stays respon
 |---|---|
 | `core/` | Tauri 2 tray app: hotkey, selection reader, wheel, supervisor |
 | `workers/pdf-light/` | Native Rust PDF worker (merge; split and friends later) |
-| `ui/` | Wheel overlay front end (WebView2 variant) |
+| `ui/` | WebView2 wheel used for the renderer comparison (the shipping wheel is native) |
 | `docs/` | Architecture notes and spike results |
+| `scripts/` | Measurement and end-to-end test scripts (PowerShell) |
 | `SPEC.md` | Full spec and roadmap |
 
 ## Building
@@ -49,6 +51,13 @@ Build Tools with the C++ workload, and the WebView2 runtime (preinstalled on Win
 cargo build --workspace
 cargo test --workspace
 cargo run -p flick-core
+```
+
+If another app already owns Ctrl + Alt + Space, Flick logs a conflict to
+`%LOCALAPPDATA%\Flick\flick.log`. Pick a different shortcut until the Settings window exists:
+
+```bash
+cargo run -p flick-core -- --shortcut "Ctrl+Alt+Shift+F12"
 ```
 
 ## Principles

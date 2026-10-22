@@ -15,7 +15,7 @@ svg {
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
 }
 
-.backdrop { fill: rgba(20, 20, 26, 0.88); }
+.backdrop { fill: rgba(20, 20, 26, 0.96); }
 .slice { fill: rgba(255, 255, 255, 0.08); }
 .slice.hover { fill: rgba(124, 196, 255, 0.92); }
 .label { fill: #f2f2f2; font-size: 12.5px; text-anchor: middle; dominant-baseline: central; }

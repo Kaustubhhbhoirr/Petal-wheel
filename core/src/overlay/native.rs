@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1Geometry, ID2D1SolidColorBrush,
     D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE, D2D1_ARC_SIZE_SMALL, D2D1_DRAW_TEXT_OPTIONS_NONE,
     D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE,
     D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
     D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
 };
@@ -244,7 +244,8 @@ impl Renderer {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let properties = D2D1_RENDER_TARGET_PROPERTIES {
-                r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                // Software: a hardware target loads the GPU driver (~50 MB) for a 300 px wheel.
+                r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT_B8G8R8A8_UNORM,
                     alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
@@ -332,7 +333,7 @@ impl Renderer {
         let inner = (wheel::INNER_RADIUS * scale) as f32;
         let ring_mid = (outer + inner) / 2.0;
 
-        let backdrop = t.CreateSolidColorBrush(&rgba(0x14, 0x14, 0x1a, 0.88), None)?;
+        let backdrop = t.CreateSolidColorBrush(&rgba(0x14, 0x14, 0x1a, 0.96), None)?;
         let slice_fill = t.CreateSolidColorBrush(&rgba(0xff, 0xff, 0xff, 0.08), None)?;
         let hover_fill = t.CreateSolidColorBrush(&rgba(0x7c, 0xc4, 0xff, 0.92), None)?;
         let text = t.CreateSolidColorBrush(&rgba(0xf2, 0xf2, 0xf2, 1.0), None)?;

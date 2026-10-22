@@ -15,7 +15,7 @@ use tauri::{
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
 };
 
 use super::{Overlay, Placement, WheelContent};
@@ -132,7 +132,9 @@ impl Overlay for WebviewOverlay {
 /// Same window behaviour as the native wheel: never takes focus, clicks pass through.
 unsafe fn show_without_focus(hwnd: HWND) {
     let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    let wanted = (WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW).0 as isize;
+    // No WS_EX_TOOLWINDOW: changing it after creation brings back a title bar, and
+    // skip_taskbar already keeps the window off the taskbar.
+    let wanted = (WS_EX_NOACTIVATE | WS_EX_TRANSPARENT).0 as isize;
     if style & wanted != wanted {
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | wanted);
     }

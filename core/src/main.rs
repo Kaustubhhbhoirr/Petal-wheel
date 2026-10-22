@@ -39,10 +39,11 @@ impl Renderer {
 
 /// Command line, mostly for the spike's measurements:
 ///
-///   flick [--renderer native|webview|webview-warm] [--open-once]
+///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Alt+Space"] [--open-once]
 ///   flick --bench <renderer> [--runs N] [--out results.json]
 struct Args {
     renderer: Renderer,
+    shortcut: Shortcut,
     bench: bool,
     runs: usize,
     out: Option<PathBuf>,
@@ -53,6 +54,7 @@ impl Args {
     fn parse() -> Self {
         let mut args = Args {
             renderer: Renderer::Native,
+            shortcut: Shortcut::default(),
             bench: false,
             runs: 20,
             out: None,
@@ -68,6 +70,13 @@ impl Args {
                         log(&format!("unknown renderer {name:?}, using native"));
                         Renderer::Native
                     });
+                }
+                "--shortcut" => {
+                    let text = it.next().unwrap_or_default();
+                    match text.parse() {
+                        Ok(shortcut) => args.shortcut = shortcut,
+                        Err(e) => log(&format!("ignoring shortcut {text:?}: {e}")),
+                    }
                 }
                 "--runs" => args.runs = it.next().and_then(|n| n.parse().ok()).unwrap_or(20),
                 "--out" => args.out = it.next().map(PathBuf::from),
@@ -106,7 +115,7 @@ fn main() {
                 let overlay = overlay.clone();
                 std::thread::spawn(move || open_once(&*overlay));
             }
-            start_hotkey(app.handle(), overlay);
+            start_hotkey(app.handle(), overlay, args.shortcut);
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -159,8 +168,7 @@ fn make_overlay(app: &AppHandle, renderer: Renderer) -> Result<Arc<dyn Overlay>,
     Ok(overlay)
 }
 
-fn start_hotkey(app: &AppHandle, overlay: Arc<dyn Overlay>) {
-    let shortcut = Shortcut::default();
+fn start_hotkey(app: &AppHandle, overlay: Arc<dyn Overlay>, shortcut: Shortcut) {
     let (tx, rx) = mpsc::channel();
     let worker_dir = std::env::current_exe()
         .ok()
