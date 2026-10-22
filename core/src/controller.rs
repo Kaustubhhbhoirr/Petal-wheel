@@ -16,12 +16,12 @@ use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 use crate::config::Config;
 use crate::hotkey::HotkeyEvent;
-use crate::jobs::{self, JobError};
+use crate::jobs::{self, JobError, Summary};
 use crate::log::log;
 use crate::overlay::{Overlay, Placement, WheelContent};
 use crate::packs::Catalog;
 use crate::selection::{foreground_window, selected_paths, Selection};
-use crate::supervisor::{CancelToken, SupervisorError};
+use crate::supervisor::CancelToken;
 use crate::toast::{Toast, Toaster};
 use crate::wheel::{hit_test, Slice};
 
@@ -175,19 +175,27 @@ fn run_jobs(jobs: Receiver<Job>, shared: Arc<Shared>, toaster: Arc<dyn Toaster>)
             cancel: cancel.clone(),
         });
         match jobs::run_slice(&pack, &slice, &job.paths, &cancel) {
-            Ok(output) => {
+            Ok(outcome) => {
                 log(&format!(
-                    "{} done in {:.0} ms: {}",
+                    "{} done in {:.0} ms: {} file(s), first {}",
                     slice.id,
                     ms(started.elapsed()),
-                    output.display()
+                    outcome.outputs.len(),
+                    outcome.outputs[0].display()
                 ));
-                toaster.show(Toast::Done {
-                    title: format!("{} done", slice.label),
-                    output,
+                for (input, error) in &outcome.failed {
+                    log(&format!(
+                        "{} failed on {}: {error}",
+                        slice.id,
+                        input.display()
+                    ));
+                }
+                toaster.show(match jobs::summarize(&slice.label, &outcome) {
+                    Summary::Done { title, output } => Toast::Done { title, output },
+                    Summary::Partial { title, message } => Toast::Failed { title, message },
                 });
             }
-            Err(JobError::Supervisor(SupervisorError::Cancelled)) => {
+            Err(JobError::Cancelled) => {
                 log(&format!("{} cancelled", slice.id));
                 toaster.hide();
             }

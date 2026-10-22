@@ -22,6 +22,20 @@ const MEMORY_MB: std::ops::RangeInclusive<usize> = 64..=4096;
 const TIME_SECONDS: std::ops::RangeInclusive<u64> = 5..=3600;
 const CPU_PERCENT: std::ops::RangeInclusive<u32> = 5..=100;
 
+/// Icon names a slice may use. The wheel draws these natively, so packs cannot ship their own.
+pub const ICONS: &[&str] = &[
+    "merge",
+    "split",
+    "rotate",
+    "image-pdf",
+    "convert",
+    "shrink",
+    "compress",
+    "copy",
+    "zip",
+    "pages",
+];
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -76,9 +90,22 @@ struct SliceSpec {
     min_files: usize,
     #[serde(default)]
     max_files: Option<usize>,
+    #[serde(default)]
+    mode: Mode,
     /// Output file name template, e.g. "{stem} - merged.pdf". See [`output_name`].
     output: String,
     action: ActionSpec,
+}
+
+/// How a slice's worker is run on the selection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    /// One run with every selected file, saved next to the first one (merge, images to PDF).
+    #[default]
+    Combine,
+    /// One run per selected file, each saved next to its own input (rotate, convert).
+    Each,
 }
 
 fn one() -> usize {
@@ -121,6 +148,9 @@ pub struct PackSlice {
     pub applies_to: Vec<String>,
     pub min_files: usize,
     pub max_files: Option<usize>,
+    pub mode: Mode,
+    /// Output name template. With `{n}` in it, one run makes several files (see
+    /// [`PackSlice::multi_output`]).
     pub output: String,
     /// Id of the pack whose worker runs this slice.
     pub worker: String,
@@ -140,6 +170,12 @@ pub struct Catalog {
 }
 
 impl PackSlice {
+    /// Whether one run makes several numbered files (`{n}` in the output template), such as one
+    /// file per page. Such workers get an empty folder to write into instead of one file path.
+    pub fn multi_output(&self) -> bool {
+        self.output.contains("{n}")
+    }
+
     /// Whether this slice applies to exactly this selection.
     pub fn matches(&self, paths: &[impl AsRef<Path>]) -> bool {
         let count = paths.len();
@@ -344,13 +380,20 @@ fn load_pack(dir: &Path, exe_dir: Option<&Path>) -> Result<Pack, String> {
                 "{where_}: min_files must be at least 1 and not above max_files."
             ));
         }
+        if let Some(icon) = spec.icon.as_deref().filter(|i| !ICONS.contains(i)) {
+            return Err(format!(
+                "{where_}: icon \"{icon}\" is not one of {}.",
+                ICONS.join(", ")
+            ));
+        }
         if !allowed_workers.contains(spec.action.worker.as_str()) {
             return Err(format!(
                 "{where_} uses the \"{}\" worker; add it to requires_packs.",
                 spec.action.worker
             ));
         }
-        output_name(&spec.output, Path::new("example.pdf"))
+        let n = spec.output.contains("{n}").then_some("1");
+        output_name(&spec.output, Path::new("example.pdf"), n)
             .map_err(|e| format!("{where_}: output {e}"))?;
         slices.push(PackSlice {
             id: format!("{}.{}", manifest.id, spec.id),
@@ -363,6 +406,7 @@ fn load_pack(dir: &Path, exe_dir: Option<&Path>) -> Result<Pack, String> {
                 .collect(),
             min_files: spec.min_files,
             max_files: spec.max_files,
+            mode: spec.mode,
             output: spec.output,
             worker: spec.action.worker,
             op: spec.action.op,
@@ -415,9 +459,10 @@ fn is_identifier(text: &str) -> bool {
 
 /// Builds an output file name from a slice's template and the (first, after sorting) input.
 ///
-/// Placeholders: `{stem}` (file name without extension) and `{ext}` (extension without the dot).
+/// Placeholders: `{stem}` (file name without extension), `{ext}` (extension without the dot) and,
+/// for slices that make several files, `{n}` (the file's number, given as `n`).
 /// The result must be a plain file name: no folders, so output always lands next to the input.
-pub fn output_name(template: &str, input: &Path) -> Result<String, String> {
+pub fn output_name(template: &str, input: &Path, n: Option<&str>) -> Result<String, String> {
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -434,6 +479,7 @@ pub fn output_name(template: &str, input: &Path) -> Result<String, String> {
         match &rest[start + 1..end] {
             "stem" => out.push_str(&stem),
             "ext" => out.push_str(&ext),
+            "n" => out.push_str(n.ok_or("uses {n}, which needs a file number.")?),
             other => return Err(format!("uses unknown placeholder {{{other}}}.")),
         }
         rest = &rest[end + 1..];
@@ -540,6 +586,9 @@ action = { worker = "pdf-light", op = "merge" }
             (MERGE.replace("worker = \"pdf-light\"", "worker = \"other\""), "requires_packs"),
             (MERGE.replace("id = \"pdf-light\"", "id = \"PDF Light\""), "lower-case"),
             (MERGE.replace("label = \"Merge\"", "label = \"Merge\"\ncolour = \"red\""), "colour"),
+            (MERGE.replace("label = \"Merge\"", "label = \"Merge\"\nmode = \"pages\""), "unknown variant"),
+            (MERGE.replace("label = \"Merge\"", "label = \"Merge\"\nicon = \"merge.svg\""), "is not one of"),
+            (MERGE.replace("{stem} - merged", "{stem} - {page}"), "unknown placeholder"),
             (format!("{MERGE}\n[limits]\nmemory_mb = 99999\n"), "Limits"),
             (MERGE.replace("\n[[slices]]", "\n[[slices]]\nid = \"merge\"\nlabel = \"Again\"\napplies_to = [\"pdf\"]\noutput = \"x.pdf\"\naction = { worker = \"pdf-light\", op = \"x\" }\n\n[[slices]]"), "defined twice"),
         ];
@@ -624,6 +673,7 @@ action = { worker = "pdf-light", op = "merge" }
             applies_to: applies_to.iter().map(|s| s.to_string()).collect(),
             min_files: min,
             max_files: max,
+            mode: Mode::Combine,
             output: "{stem}.out".into(),
             worker: "p".into(),
             op: "s".into(),
@@ -699,16 +749,47 @@ action = { worker = "pdf-light", op = "compress" }
     fn output_names_come_from_the_template() {
         let input = Path::new("notes/Chapter 1.pdf");
         assert_eq!(
-            output_name("{stem} - merged.pdf", input).unwrap(),
+            output_name("{stem} - merged.pdf", input, None).unwrap(),
             "Chapter 1 - merged.pdf"
         );
         assert_eq!(
-            output_name("{stem}.{ext}.bak", input).unwrap(),
+            output_name("{stem}.{ext}.bak", input, None).unwrap(),
             "Chapter 1.pdf.bak"
         );
-        assert!(output_name("{stem", input).is_err());
-        assert!(output_name("sub/{stem}.pdf", input).is_err());
-        assert!(output_name("{stem}:x", input).is_err());
-        assert!(output_name("{ext}", Path::new("README")).is_err());
+        assert!(output_name("{stem", input, None).is_err());
+        assert!(output_name("sub/{stem}.pdf", input, None).is_err());
+        assert!(output_name("{stem}:x", input, None).is_err());
+        assert!(output_name("{ext}", Path::new("README"), None).is_err());
+
+        let split = "{stem} - page {n}.pdf";
+        assert_eq!(
+            output_name(split, input, Some("07")).unwrap(),
+            "Chapter 1 - page 07.pdf"
+        );
+        assert!(output_name(split, input, None).is_err());
+    }
+
+    #[test]
+    fn modes_and_multi_output_slices_load() {
+        let manifest = MERGE.to_string()
+            + r#"
+[[slices]]
+id = "split"
+label = "Split"
+icon = "split"
+applies_to = ["pdf"]
+mode = "each"
+output = "{stem} - page {n}.pdf"
+action = { worker = "pdf-light", op = "split" }
+"#;
+        let catalog = load(&[("pdf-light", &manifest)]);
+        assert!(catalog.errors.is_empty(), "{:?}", catalog.errors);
+        let (_, merge) = catalog.find("pdf-light.merge").unwrap();
+        assert_eq!(merge.mode, Mode::Combine);
+        assert!(!merge.multi_output());
+        let (_, split) = catalog.find("pdf-light.split").unwrap();
+        assert_eq!(split.mode, Mode::Each);
+        assert_eq!(split.icon.as_deref(), Some("split"));
+        assert!(split.multi_output());
     }
 }

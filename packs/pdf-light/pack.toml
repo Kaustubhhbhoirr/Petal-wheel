@@ -19,7 +19,7 @@ cpu_percent = 50
 [[slices]]
 id = "merge"
 label = "Merge"
-icon = "icons/merge.svg"
+icon = "merge"
 applies_to = ["pdf"]
 min_files = 2
 # {stem} is the name of the first file (after sorting by name), without its extension.
