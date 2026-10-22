@@ -1,6 +1,6 @@
 [package]
 name = "pdf-light"
-description = "Flick native PDF worker: merge, split and other light page operations."
+description = "Flick native PDF worker: merge, split, rotate and other light page operations."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

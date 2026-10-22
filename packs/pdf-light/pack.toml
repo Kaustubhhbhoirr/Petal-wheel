@@ -25,3 +25,22 @@ min_files = 2
 # {stem} is the name of the first file (after sorting by name), without its extension.
 output = "{stem} - merged.pdf"
 action = { worker = "pdf-light", op = "merge" }
+
+[[slices]]
+id = "split"
+label = "Split"
+icon = "split"
+applies_to = ["pdf"]
+# Each selected PDF is split on its own. {n} is the page number, zero-padded so the files sort.
+mode = "each"
+output = "{stem} - page {n}.pdf"
+action = { worker = "pdf-light", op = "split" }
+
+[[slices]]
+id = "rotate"
+label = "Rotate"
+icon = "rotate"
+applies_to = ["pdf"]
+mode = "each"
+output = "{stem} - rotated.pdf"
+action = { worker = "pdf-light", op = "rotate" }
