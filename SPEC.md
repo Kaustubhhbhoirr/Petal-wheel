@@ -97,6 +97,8 @@ Flick's difference is the workflow: **select the file, press a key, pick the act
 - Same base name, new extension: `report.pdf` becomes `report.docx`.
 - Collision: `report (1).docx`, `report (2).docx`.
 - Multi-file results (merge, images to PDF) are named from the first file (`Chapter 1 - merged.pdf`), sorted by filename.
+- Actions that make several files from one input (split) number them, zero-padded so they sort: `Report - page 01.pdf` to `Report - page 12.pdf`. Either all of them are saved or none.
+- With several files selected, per-file actions (rotate, convert, shrink) save one result next to each input; a file that fails does not stop the others.
 
 ### 4.3 Wheel contents (v1)
 
@@ -118,7 +120,7 @@ The wheel becomes a launcher: pinned apps and folders, system shortcuts (Setting
 ### 4.5 Page tools
 - **Remove pages:** a small prompt such as `3, 5-7`.
 - **Organize pages:** thumbnail grid. Click to delete, drag to reorder, rotate, then Save as new file.
-- **Split:** by range, every N pages, or one file per page.
+- **Split:** by range, every N pages, or one file per page. (v0.5 ships one file per page; ranges need a prompt UI.)
 
 ---
 
@@ -227,9 +229,11 @@ time_seconds = 120
 [[slices]]
 id = "merge"
 label = "Merge"
-icon = "icons/merge.svg"
+icon = "merge"                 # a name the wheel draws natively
 applies_to = ["pdf"]
 min_files = 2
+mode = "combine"               # or "each": one run per selected file
+output = "{stem} - merged.pdf" # "{n}" (e.g. "{stem} - page {n}.pdf") makes one file per page
 action = { worker = "pdf-light", op = "merge" }
 ```
 

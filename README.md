@@ -3,7 +3,7 @@
 Select a file, press a shortcut, flick to an action. No uploads, no ads, no subscriptions, no internet.
 
 > **Status:** v0.5 alpha in progress. Packs, a Settings window and Flick's own progress toast work
-> on Windows 11, with one action so far (merge PDFs). Spike measurements are in
+> on Windows 11, with the actions listed below. Spike measurements are in
 > [docs/spike-results.md](docs/spike-results.md). Not ready for daily use yet.
 
 ## How it works
@@ -18,6 +18,22 @@ installed packs. They are saved in a plain file, `%APPDATA%\Flick\config.toml`.
 
 Originals are never modified. If `report.pdf` already has a `report.docx` next to it, the output becomes
 `report (1).docx`.
+
+## Actions
+
+| Action | Works on | Result, saved next to the original |
+|---|---|---|
+| **Merge** | 2 or more PDFs | `Chapter 1 - merged.pdf`, in name order (Chapter 2 before Chapter 10) |
+| **Split** | PDFs | One file per page: `Report - page 01.pdf` ... `Report - page 12.pdf` |
+| **Rotate** | PDFs | `Report - rotated.pdf`, every page turned 90° clockwise |
+| **To PDF** | JPG and PNG images | `photo 1 - images.pdf`, a page per image sized to it; JPGs keep their exact quality |
+| **To PNG** | JPG, WebP, BMP | `photo.png`, transparency kept |
+| **To JPG** | PNG, WebP, BMP | `photo.jpg` (quality 90), transparent areas white |
+| **Shrink** | JPG, PNG, WebP, BMP | `photo - small.jpg`, at most 1600 px on the longest side, or a message if it would not get smaller |
+
+With several files selected, Split, Rotate and the image conversions handle each file on its own; if
+one file fails, the others are still saved. PDF tools keep text selectable. Password-protected PDFs
+are refused with a clear message.
 
 ## Why
 
@@ -41,7 +57,8 @@ A frozen or crashing conversion only kills its own worker. The core stays respon
 |---|---|
 | `core/` | Tauri 2 tray app: hotkey, selection reader, wheel, toast, pack loader, supervisor |
 | `packs/` | Pack manifests (`pack.toml`); each pack adds wheel actions and names its worker |
-| `workers/pdf-light/` | Native Rust PDF worker (merge; split and friends later) |
+| `workers/pdf-light/` | Native Rust PDF worker: merge, split, rotate |
+| `workers/image-tools/` | Native Rust image worker: images to PDF, PNG/JPG conversion, shrink |
 | `ui/` | Settings window, plus the WebView2 wheel kept from the renderer comparison |
 | `docs/` | Architecture, [how to make a pack](docs/packs.md), spike results |
 | `scripts/` | Measurement and end-to-end test scripts (PowerShell) |

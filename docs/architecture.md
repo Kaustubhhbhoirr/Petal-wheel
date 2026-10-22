@@ -52,7 +52,11 @@ Probe: `cargo run -p flick-core --example selection_probe [-- --foreground 3]`.
 - **Packs** (`core/src/packs.rs`, format in [packs.md](packs.md)). Every folder under `packs/` with
   a `pack.toml` is loaded and validated at startup (about 1 ms). Problems are reported per pack, never
   fatal. The wheel's slices come from the loaded packs, filtered by the selection and ordered by the
-  user's config. A job runs the slice's worker with that pack's limits (`jobs::run_slice`).
+  user's config. A job runs the slice's worker with that pack's limits (`jobs::run_slice`): once
+  with all files (`combine`) or once per file (`each`), each run in its own Job Object. Slices with
+  `{n}` in their output template get an empty temp folder instead of a temp file; the core moves
+  the files out to numbered names and removes them all again if anything fails
+  (`jobs::run_slice_with` holds this logic and is tested without Windows).
 - **Config** (`core/src/config.rs`): `%APPDATA%\Flick\config.toml` holds the shortcut, slice order and
   disabled slices. A missing or broken file falls back to defaults; saves go through a temp file.
 - **Toast** (`core/src/toast.rs`): a native layered card, drawn with the same Direct2D code as the
