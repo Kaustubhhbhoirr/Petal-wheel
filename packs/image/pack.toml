@@ -1,8 +1,8 @@
 # The Image pack: convert, shrink and combine pictures natively, no Python needed.
 id = "image"
 name = "Image"
-version = "0.5.0"
-requires_core = ">=0.5"
+version = "0.6.0"
+requires_core = ">=0.6"
 requires_packs = []
 license = "AGPL-3.0"
 
@@ -31,7 +31,7 @@ id = "to-png"
 label = "To PNG"
 icon = "convert"
 applies_to = ["jpg", "jpeg", "webp", "bmp"]
-mode = "each"
+runs = "each"
 output = "{stem}.png"
 action = { worker = "image", op = "to_png" }
 
@@ -40,7 +40,7 @@ id = "to-jpg"
 label = "To JPG"
 icon = "convert"
 applies_to = ["png", "webp", "bmp"]
-mode = "each"
+runs = "each"
 output = "{stem}.jpg"
 action = { worker = "image", op = "to_jpg" }
 
@@ -49,6 +49,6 @@ id = "shrink"
 label = "Shrink"
 icon = "shrink"
 applies_to = ["jpg", "jpeg", "png", "webp", "bmp"]
-mode = "each"
+runs = "each"
 output = "{stem} - small.jpg"
 action = { worker = "image", op = "shrink" }

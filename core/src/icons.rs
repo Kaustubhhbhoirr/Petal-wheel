@@ -16,6 +16,12 @@ const ICONS: &[(&str, &str)] = &[
     ("copy", "M9 9h11v12H9z M5 15H4V3h11v1"),
     ("zip", "M6 3h12v18H6z M12 3v2 M12 7v2 M12 11v2 M10.5 14.5h3v3.5h-3z"),
     ("pages", "M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M16 8.5h.01"),
+    ("more", "M4.5 12h1 M11.5 12h1 M18.5 12h1"),
+    ("rotate-left", "M4 11a8 8 0 1 1 2.34 5.66 M4 4v7h7"),
+    ("rotate-180", "M8 20V9a4 4 0 0 1 8 0v11 M13 17l3 3 3-3"),
+    ("remove-pages", "M6 3h9l4 4v14H6z M15 3v4h4 M9.5 14h6"),
+    ("organize", "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z"),
+    ("target", "M12 3a9 9 0 1 0 .01 0z M12 8a4 4 0 1 0 .01 0z M12 11.5h.01"),
 ];
 
 /// Used when a slice has no icon or names one Flick does not have.

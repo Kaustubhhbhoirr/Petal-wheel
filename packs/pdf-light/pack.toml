@@ -1,8 +1,8 @@
 # The PDF Light pack: fast page operations done natively, no Python needed.
 id = "pdf-light"
 name = "PDF Light"
-version = "0.5.0"
-requires_core = ">=0.5"
+version = "0.6.0"
+requires_core = ">=0.6"
 requires_packs = []
 license = "AGPL-3.0"
 
@@ -32,7 +32,7 @@ label = "Split"
 icon = "split"
 applies_to = ["pdf"]
 # Each selected PDF is split on its own. {n} is the page number, zero-padded so the files sort.
-mode = "each"
+runs = "each"
 output = "{stem} - page {n}.pdf"
 action = { worker = "pdf-light", op = "split" }
 
@@ -41,6 +41,6 @@ id = "rotate"
 label = "Rotate"
 icon = "rotate"
 applies_to = ["pdf"]
-mode = "each"
+runs = "each"
 output = "{stem} - rotated.pdf"
 action = { worker = "pdf-light", op = "rotate" }

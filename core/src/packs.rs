@@ -34,6 +34,12 @@ pub const ICONS: &[&str] = &[
     "copy",
     "zip",
     "pages",
+    "more",
+    "rotate-left",
+    "rotate-180",
+    "remove-pages",
+    "organize",
+    "target",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +84,22 @@ impl Default for LimitSpec {
     }
 }
 
+/// How deep slices may nest: the main ring plus one ring of children. The data model and the
+/// loader are recursive, so raising this to 3 is the only change needed for a third level.
+pub const MAX_DEPTH: usize = 2;
+/// A `choice` slice holds at most this many children, so a sub-ring stays readable.
+pub const MAX_CHILDREN: usize = 8;
+
+/// Screens of the Flick app window that an `app` slice may open. Screens are built into Flick, so
+/// packs pick one by name rather than shipping code.
+pub const APP_SCREENS: &[&str] = &[
+    "remove-pages",
+    "rotate-pages",
+    "organize-pages",
+    "split-ranges",
+    "compress-target",
+];
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SliceSpec {
@@ -85,31 +107,54 @@ struct SliceSpec {
     label: String,
     #[serde(default)]
     icon: Option<String>,
-    applies_to: Vec<String>,
-    #[serde(default = "one")]
-    min_files: usize,
+    /// Required on top-level slices; children inherit their parent's when they leave it out.
+    #[serde(default)]
+    applies_to: Option<Vec<String>>,
+    #[serde(default)]
+    min_files: Option<usize>,
     #[serde(default)]
     max_files: Option<usize>,
     #[serde(default)]
-    mode: Mode,
+    mode: Tier,
+    #[serde(default)]
+    runs: Runs,
     /// Output file name template, e.g. "{stem} - merged.pdf". See [`output_name`].
-    output: String,
-    action: ActionSpec,
+    #[serde(default)]
+    output: Option<String>,
+    #[serde(default)]
+    action: Option<ActionSpec>,
+    /// For `app` slices: which screen of the Flick app window opens.
+    #[serde(default)]
+    app: Option<String>,
+    /// For `choice` slices: the child that runs when the user releases over the parent itself.
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    children: Vec<SliceSpec>,
+}
+
+/// What happens when a slice is chosen (SPEC 4.3, "action tiers").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tier {
+    /// Needs no input: runs as soon as the shortcut is released.
+    #[default]
+    Quick,
+    /// A few fixed options: hovering opens its children as a sub-ring.
+    Choice,
+    /// Needs real input (pages, a number, text): opens the Flick app window with the files.
+    App,
 }
 
 /// How a slice's worker is run on the selection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Mode {
+pub enum Runs {
     /// One run with every selected file, saved next to the first one (merge, images to PDF).
     #[default]
-    Combine,
+    Once,
     /// One run per selected file, each saved next to its own input (rotate, convert).
     Each,
-}
-
-fn one() -> usize {
-    1
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +162,9 @@ fn one() -> usize {
 struct ActionSpec {
     worker: String,
     op: String,
+    /// Extra settings for the op, passed to the worker as `args` (e.g. `{ degrees = 90 }`).
+    #[serde(default)]
+    args: Option<toml::Table>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -138,9 +186,9 @@ pub struct Pack {
     pub slices: Vec<PackSlice>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PackSlice {
-    /// Globally unique: "<pack id>.<slice id>".
+    /// Globally unique: "<pack id>.<slice id>", plus ".<child id>" for each level of nesting.
     pub id: String,
     pub label: String,
     pub icon: Option<String>,
@@ -148,13 +196,22 @@ pub struct PackSlice {
     pub applies_to: Vec<String>,
     pub min_files: usize,
     pub max_files: Option<usize>,
-    pub mode: Mode,
+    pub mode: Tier,
+    pub runs: Runs,
     /// Output name template. With `{n}` in it, one run makes several files (see
-    /// [`PackSlice::multi_output`]).
+    /// [`PackSlice::multi_output`]). Empty for `choice` slices.
     pub output: String,
-    /// Id of the pack whose worker runs this slice.
+    /// Id of the pack whose worker runs this slice. Empty for `choice` slices.
     pub worker: String,
     pub op: String,
+    /// Settings passed to the worker with every request (`null` when there are none).
+    pub args: serde_json::Value,
+    /// For `app` slices: the app window screen.
+    pub app: Option<String>,
+    /// For `choice` slices: full id of the child released-over-the-parent runs.
+    pub default_child: Option<String>,
+    /// For `choice` slices: the options, in manifest order.
+    pub children: Vec<PackSlice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -194,38 +251,92 @@ impl PackSlice {
     }
 }
 
+/// Sorts `slices` by the user's order (ids listed in `config.order` first, in that order); slices
+/// the user has not placed keep their manifest order after those. Never sorts by usage, so
+/// positions stay where the user's muscle memory expects them.
+fn sort_by_config(slices: &mut [&PackSlice], config: &SliceConfig) {
+    let rank: HashMap<&str, usize> = config
+        .order
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+    // Stable sort keeps manifest order for slices the user has not placed.
+    slices.sort_by_key(|s| rank.get(s.id.as_str()).copied().unwrap_or(usize::MAX));
+}
+
+/// A slice and, for `choice` slices, the children that apply, ready for the wheel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Applicable<'a> {
+    pub slice: &'a PackSlice,
+    pub children: Vec<Applicable<'a>>,
+}
+
 impl Catalog {
-    /// Every loaded slice in the user's order: configured order first, then pack order.
-    /// Disabled slices are included; see [`Catalog::slices_for`] for what the wheel shows.
+    /// Every loaded top-level slice in the user's order: configured order first, then pack
+    /// order. Disabled slices are included; see [`Catalog::slices_for`] for what the wheel shows.
     pub fn ordered_slices(&self, config: &SliceConfig) -> Vec<&PackSlice> {
         let mut slices: Vec<&PackSlice> = self.packs.iter().flat_map(|p| &p.slices).collect();
-        let rank: HashMap<&str, usize> = config
-            .order
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (id.as_str(), i))
-            .collect();
-        // Stable sort keeps pack order for slices the user has not placed.
-        slices.sort_by_key(|s| rank.get(s.id.as_str()).copied().unwrap_or(usize::MAX));
+        sort_by_config(&mut slices, config);
         slices
     }
 
-    /// The enabled slices that apply to `paths`, in the user's order.
+    /// The enabled top-level slices that apply to `paths`, in the user's order.
     pub fn slices_for(&self, paths: &[impl AsRef<Path>], config: &SliceConfig) -> Vec<&PackSlice> {
-        self.ordered_slices(config)
+        self.tree_for(paths, config)
             .into_iter()
-            .filter(|s| !config.disabled.contains(&s.id) && s.matches(paths))
+            .map(|a| a.slice)
             .collect()
     }
 
-    /// The slice with this id and the pack whose worker runs it.
+    /// The enabled slices that apply to `paths`, with their applicable children, all in the
+    /// user's order. A `choice` slice left with no applicable children is dropped.
+    pub fn tree_for(
+        &self,
+        paths: &[impl AsRef<Path>],
+        config: &SliceConfig,
+    ) -> Vec<Applicable<'_>> {
+        fn build<'a>(
+            slices: Vec<&'a PackSlice>,
+            paths: &[impl AsRef<Path>],
+            config: &SliceConfig,
+        ) -> Vec<Applicable<'a>> {
+            slices
+                .into_iter()
+                .filter(|s| !config.disabled.contains(&s.id) && s.matches(paths))
+                .filter_map(|slice| {
+                    let mut kids: Vec<&PackSlice> = slice.children.iter().collect();
+                    sort_by_config(&mut kids, config);
+                    let children = build(kids, paths, config);
+                    (slice.mode != Tier::Choice || !children.is_empty())
+                        .then_some(Applicable { slice, children })
+                })
+                .collect()
+        }
+        build(self.ordered_slices(config), paths, config)
+    }
+
+    /// The slice with this id (at any depth) and the pack whose worker runs it.
     pub fn find(&self, slice_id: &str) -> Option<(&Pack, &PackSlice)> {
+        fn search<'a>(slices: &'a [PackSlice], id: &str) -> Option<&'a PackSlice> {
+            slices.iter().find_map(|s| {
+                if s.id == id {
+                    Some(s)
+                } else {
+                    search(&s.children, id)
+                }
+            })
+        }
         let slice = self
             .packs
             .iter()
-            .flat_map(|p| &p.slices)
-            .find(|s| s.id == slice_id)?;
-        let worker = self.packs.iter().find(|p| p.id == slice.worker)?;
+            .find_map(|p| search(&p.slices, slice_id))?;
+        let worker = self.packs.iter().find(|p| p.id == slice.worker);
+        // A `choice` slice runs no worker itself; report its own pack.
+        let worker = worker.or_else(|| {
+            let pack_id = slice_id.split('.').next()?;
+            self.packs.iter().find(|p| p.id == pack_id)
+        })?;
         Some((worker, slice))
     }
 }
@@ -289,11 +400,181 @@ fn drop_broken_dependents(catalog: &mut Catalog) {
 }
 
 fn missing_dependency(pack: &Pack, loaded: &HashSet<String>) -> Option<String> {
-    pack.slices
-        .iter()
-        .map(|s| &s.worker)
-        .find(|w| !loaded.contains(*w))
-        .cloned()
+    fn walk(slices: &[PackSlice], loaded: &HashSet<String>) -> Option<String> {
+        slices.iter().find_map(|s| {
+            if !s.worker.is_empty() && !loaded.contains(&s.worker) {
+                Some(s.worker.clone())
+            } else {
+                walk(&s.children, loaded)
+            }
+        })
+    }
+    walk(&pack.slices, loaded)
+}
+
+/// What a child slice inherits from its parent when it leaves a field out.
+struct Inherited {
+    applies_to: Vec<String>,
+    min_files: usize,
+    max_files: Option<usize>,
+}
+
+/// Validates one slice (and, recursively, its children) and builds it. `prefix` is the id of
+/// the parent ("pdf-light" for top-level slices), `depth` is 1 for the main ring.
+fn build_slice(
+    spec: SliceSpec,
+    prefix: &str,
+    depth: usize,
+    parent: Option<&Inherited>,
+    allowed_workers: &HashSet<&str>,
+) -> Result<PackSlice, String> {
+    let where_ = format!("Slice \"{}\"", spec.id);
+    if !is_identifier(&spec.id) {
+        return Err(format!(
+            "{where_}: ids must use only lower-case letters, digits and dashes."
+        ));
+    }
+    if spec.label.trim().is_empty() {
+        return Err(format!("{where_} needs a label."));
+    }
+    let applies_to = match (spec.applies_to, parent) {
+        (Some(list), _) if list.is_empty() => {
+            return Err(format!(
+                "{where_}: applies_to must list at least one extension."
+            ))
+        }
+        (Some(list), _) => list
+            .iter()
+            .map(|e| e.trim_start_matches('.').to_ascii_lowercase())
+            .collect(),
+        (None, Some(parent)) => parent.applies_to.clone(),
+        (None, None) => {
+            return Err(format!(
+                "{where_}: applies_to must list at least one extension."
+            ))
+        }
+    };
+    let min_files = spec.min_files.or(parent.map(|p| p.min_files)).unwrap_or(1);
+    let max_files = spec.max_files.or(parent.and_then(|p| p.max_files));
+    if min_files == 0 || max_files.is_some_and(|max| max < min_files) {
+        return Err(format!(
+            "{where_}: min_files must be at least 1 and not above max_files."
+        ));
+    }
+    if let Some(icon) = spec.icon.as_deref().filter(|i| !ICONS.contains(i)) {
+        return Err(format!(
+            "{where_}: icon \"{icon}\" is not one of {}.",
+            ICONS.join(", ")
+        ));
+    }
+
+    let id = format!("{prefix}.{}", spec.id);
+    let mut slice = PackSlice {
+        id: id.clone(),
+        label: spec.label,
+        icon: spec.icon,
+        applies_to,
+        min_files,
+        max_files,
+        mode: spec.mode,
+        runs: spec.runs,
+        ..PackSlice::default()
+    };
+
+    match spec.mode {
+        Tier::Choice => {
+            if spec.action.is_some() || spec.output.is_some() || spec.app.is_some() {
+                return Err(format!(
+                    "{where_}: a choice slice runs one of its children, so it has no action, output or app."
+                ));
+            }
+            if depth >= MAX_DEPTH {
+                return Err(format!(
+                    "{where_}: slices can nest {MAX_DEPTH} levels deep at most."
+                ));
+            }
+            if spec.children.is_empty() || spec.children.len() > MAX_CHILDREN {
+                return Err(format!(
+                    "{where_}: a choice slice needs 1 to {MAX_CHILDREN} children."
+                ));
+            }
+            let inherited = Inherited {
+                applies_to: slice.applies_to.clone(),
+                min_files,
+                max_files,
+            };
+            let mut seen = HashSet::new();
+            for child in spec.children {
+                if !seen.insert(child.id.clone()) {
+                    return Err(format!(
+                        "{where_}: child \"{}\" is defined twice.",
+                        child.id
+                    ));
+                }
+                slice.children.push(
+                    build_slice(child, &id, depth + 1, Some(&inherited), allowed_workers)
+                        .map_err(|e| format!("{where_}: {e}"))?,
+                );
+            }
+            if let Some(default) = spec.default {
+                if !seen.contains(&default) {
+                    return Err(format!(
+                        "{where_}: default \"{default}\" is not one of its children."
+                    ));
+                }
+                slice.default_child = Some(format!("{id}.{default}"));
+            }
+        }
+        Tier::Quick | Tier::App => {
+            if !spec.children.is_empty() || spec.default.is_some() {
+                return Err(format!(
+                    "{where_}: only choice slices have children and a default."
+                ));
+            }
+            match (spec.mode, &spec.app) {
+                (Tier::App, None) => {
+                    return Err(format!(
+                        "{where_}: an app slice names its screen with app = \"...\"."
+                    ))
+                }
+                (Tier::App, Some(screen)) if !APP_SCREENS.contains(&screen.as_str()) => {
+                    return Err(format!(
+                        "{where_}: app \"{screen}\" is not one of {}.",
+                        APP_SCREENS.join(", ")
+                    ))
+                }
+                (Tier::Quick, Some(_)) => {
+                    return Err(format!("{where_}: app = \"...\" needs mode = \"app\"."))
+                }
+                _ => {}
+            }
+            let action = spec
+                .action
+                .ok_or_else(|| format!("{where_} needs an action."))?;
+            let output = spec
+                .output
+                .ok_or_else(|| format!("{where_} needs an output name."))?;
+            if !allowed_workers.contains(action.worker.as_str()) {
+                return Err(format!(
+                    "{where_} uses the \"{}\" worker; add it to requires_packs.",
+                    action.worker
+                ));
+            }
+            let n = output.contains("{n}").then_some("1");
+            output_name(&output, Path::new("example.pdf"), n)
+                .map_err(|e| format!("{where_}: output {e}"))?;
+            slice.output = output;
+            slice.worker = action.worker;
+            slice.op = action.op;
+            slice.args = match action.args {
+                Some(table) => serde_json::to_value(table)
+                    .map_err(|e| format!("{where_}: args are not valid ({e})."))?,
+                None => serde_json::Value::Null,
+            };
+            slice.app = spec.app;
+        }
+    }
+    Ok(slice)
 }
 
 fn load_pack(dir: &Path, exe_dir: Option<&Path>) -> Result<Pack, String> {
@@ -358,59 +639,10 @@ fn load_pack(dir: &Path, exe_dir: Option<&Path>) -> Result<Pack, String> {
     let mut seen = HashSet::new();
     let mut slices = Vec::new();
     for spec in manifest.slices {
-        let where_ = format!("Slice \"{}\"", spec.id);
-        if !is_identifier(&spec.id) {
-            return Err(format!(
-                "{where_}: ids must use only lower-case letters, digits and dashes."
-            ));
-        }
         if !seen.insert(spec.id.clone()) {
-            return Err(format!("{where_} is defined twice."));
+            return Err(format!("Slice \"{}\" is defined twice.", spec.id));
         }
-        if spec.label.trim().is_empty() {
-            return Err(format!("{where_} needs a label."));
-        }
-        if spec.applies_to.is_empty() {
-            return Err(format!(
-                "{where_}: applies_to must list at least one extension."
-            ));
-        }
-        if spec.min_files == 0 || spec.max_files.is_some_and(|max| max < spec.min_files) {
-            return Err(format!(
-                "{where_}: min_files must be at least 1 and not above max_files."
-            ));
-        }
-        if let Some(icon) = spec.icon.as_deref().filter(|i| !ICONS.contains(i)) {
-            return Err(format!(
-                "{where_}: icon \"{icon}\" is not one of {}.",
-                ICONS.join(", ")
-            ));
-        }
-        if !allowed_workers.contains(spec.action.worker.as_str()) {
-            return Err(format!(
-                "{where_} uses the \"{}\" worker; add it to requires_packs.",
-                spec.action.worker
-            ));
-        }
-        let n = spec.output.contains("{n}").then_some("1");
-        output_name(&spec.output, Path::new("example.pdf"), n)
-            .map_err(|e| format!("{where_}: output {e}"))?;
-        slices.push(PackSlice {
-            id: format!("{}.{}", manifest.id, spec.id),
-            label: spec.label,
-            icon: spec.icon,
-            applies_to: spec
-                .applies_to
-                .iter()
-                .map(|e| e.trim_start_matches('.').to_ascii_lowercase())
-                .collect(),
-            min_files: spec.min_files,
-            max_files: spec.max_files,
-            mode: spec.mode,
-            output: spec.output,
-            worker: spec.action.worker,
-            op: spec.action.op,
-        });
+        slices.push(build_slice(spec, &manifest.id, 1, None, &allowed_workers)?);
     }
 
     Ok(Pack {
@@ -669,14 +901,13 @@ action = { worker = "pdf-light", op = "merge" }
         PackSlice {
             id: "p.s".into(),
             label: "S".into(),
-            icon: None,
             applies_to: applies_to.iter().map(|s| s.to_string()).collect(),
             min_files: min,
             max_files: max,
-            mode: Mode::Combine,
             output: "{stem}.out".into(),
             worker: "p".into(),
             op: "s".into(),
+            ..PackSlice::default()
         }
     }
 
@@ -770,7 +1001,7 @@ action = { worker = "pdf-light", op = "compress" }
     }
 
     #[test]
-    fn modes_and_multi_output_slices_load() {
+    fn runs_and_multi_output_slices_load() {
         let manifest = MERGE.to_string()
             + r#"
 [[slices]]
@@ -778,18 +1009,232 @@ id = "split"
 label = "Split"
 icon = "split"
 applies_to = ["pdf"]
-mode = "each"
+runs = "each"
 output = "{stem} - page {n}.pdf"
 action = { worker = "pdf-light", op = "split" }
 "#;
         let catalog = load(&[("pdf-light", &manifest)]);
         assert!(catalog.errors.is_empty(), "{:?}", catalog.errors);
         let (_, merge) = catalog.find("pdf-light.merge").unwrap();
-        assert_eq!(merge.mode, Mode::Combine);
+        assert_eq!(merge.runs, Runs::Once);
+        assert_eq!(merge.mode, Tier::Quick);
         assert!(!merge.multi_output());
         let (_, split) = catalog.find("pdf-light.split").unwrap();
-        assert_eq!(split.mode, Mode::Each);
+        assert_eq!(split.runs, Runs::Each);
         assert_eq!(split.icon.as_deref(), Some("split"));
         assert!(split.multi_output());
+    }
+
+    /// A pack with a choice slice (Rotate, with a default), an app slice and plain slices.
+    const NESTED: &str = r#"
+id = "pdf-light"
+name = "PDF Light"
+version = "1.0.0"
+requires_core = ">=0.1"
+license = "AGPL-3.0"
+
+[worker]
+kind = "native"
+entry = "bin/pdf-light.exe"
+
+[[slices]]
+id = "rotate"
+label = "Rotate"
+icon = "rotate"
+applies_to = ["pdf"]
+mode = "choice"
+default = "right"
+
+  [[slices.children]]
+  id = "right"
+  label = "90° right"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = 90 } }
+
+  [[slices.children]]
+  id = "left"
+  label = "90° left"
+  icon = "rotate-left"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = 270 } }
+
+  [[slices.children]]
+  id = "pick"
+  label = "Pick pages..."
+  mode = "app"
+  app = "rotate-pages"
+  max_files = 1
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "organize" }
+
+[[slices]]
+id = "remove"
+label = "Remove pages"
+icon = "remove-pages"
+applies_to = ["pdf"]
+max_files = 1
+mode = "app"
+app = "remove-pages"
+output = "{stem} - edited.pdf"
+action = { worker = "pdf-light", op = "organize" }
+"#;
+
+    #[test]
+    fn choice_slices_load_with_children_defaults_and_args() {
+        let catalog = load(&[("pdf-light", NESTED)]);
+        assert!(catalog.errors.is_empty(), "{:?}", catalog.errors);
+        let (pack, rotate) = catalog.find("pdf-light.rotate").unwrap();
+        assert_eq!(pack.id, "pdf-light");
+        assert_eq!(rotate.mode, Tier::Choice);
+        assert_eq!(rotate.children.len(), 3);
+        assert_eq!(
+            rotate.default_child.as_deref(),
+            Some("pdf-light.rotate.right")
+        );
+        assert!(rotate.op.is_empty() && rotate.output.is_empty());
+
+        let (_, right) = catalog.find("pdf-light.rotate.right").unwrap();
+        assert_eq!(right.args, serde_json::json!({ "degrees": 90 }));
+        // Children inherit file types from their parent.
+        assert_eq!(right.applies_to, ["pdf"]);
+
+        let (_, pick) = catalog.find("pdf-light.rotate.pick").unwrap();
+        assert_eq!(pick.mode, Tier::App);
+        assert_eq!(pick.app.as_deref(), Some("rotate-pages"));
+        assert_eq!(pick.max_files, Some(1));
+    }
+
+    #[test]
+    fn tree_filters_children_by_selection_and_config() {
+        let catalog = load(&[("pdf-light", NESTED)]);
+        let tree_ids = |config: &SliceConfig, paths: &[&str]| -> Vec<(String, Vec<String>)> {
+            catalog
+                .tree_for(paths, config)
+                .iter()
+                .map(|a| {
+                    let kids = a.children.iter().map(|c| c.slice.id.clone()).collect();
+                    (a.slice.id.clone(), kids)
+                })
+                .collect()
+        };
+        let default = SliceConfig::default();
+        // One PDF: everything applies.
+        assert_eq!(
+            tree_ids(&default, &["a.pdf"]),
+            [
+                (
+                    "pdf-light.rotate".into(),
+                    vec![
+                        "pdf-light.rotate.right".to_string(),
+                        "pdf-light.rotate.left".into(),
+                        "pdf-light.rotate.pick".into()
+                    ]
+                ),
+                ("pdf-light.remove".into(), vec![])
+            ]
+        );
+        // Two PDFs: the one-file app children drop out.
+        let two = tree_ids(&default, &["a.pdf", "b.pdf"]);
+        assert_eq!(two.len(), 1);
+        assert_eq!(two[0].1.len(), 2);
+
+        // Children follow the user's order and can be turned off.
+        let custom = SliceConfig {
+            order: vec!["pdf-light.rotate.left".into()],
+            disabled: vec!["pdf-light.rotate.pick".into()],
+        };
+        assert_eq!(
+            tree_ids(&custom, &["a.pdf"])[0].1,
+            ["pdf-light.rotate.left", "pdf-light.rotate.right"]
+        );
+
+        // A choice with every child turned off disappears.
+        let none = SliceConfig {
+            order: vec![],
+            disabled: vec![
+                "pdf-light.rotate.right".into(),
+                "pdf-light.rotate.left".into(),
+                "pdf-light.rotate.pick".into(),
+            ],
+        };
+        assert_eq!(tree_ids(&none, &["a.pdf"]).len(), 1);
+        assert_eq!(tree_ids(&none, &["a.pdf"])[0].0, "pdf-light.remove");
+    }
+
+    #[test]
+    fn tier_rules_are_enforced() {
+        let grandchild = NESTED.replace(
+            "  [[slices.children]]\n  id = \"right\"\n  label = \"90° right\"\n  runs = \"each\"\n  output = \"{stem} - rotated.pdf\"\n  action = { worker = \"pdf-light\", op = \"rotate\", args = { degrees = 90 } }\n",
+            "  [[slices.children]]\n  id = \"right\"\n  label = \"More\"\n  mode = \"choice\"\n    [[slices.children.children]]\n    id = \"deep\"\n    label = \"Deep\"\n    output = \"x.pdf\"\n    action = { worker = \"pdf-light\", op = \"x\" }\n",
+        );
+        let cases = [
+            (grandchild, "nest 2 levels deep at most"),
+            (
+                NESTED.replace("default = \"right\"", "default = \"up\""),
+                "is not one of its children",
+            ),
+            (
+                NESTED.replace("app = \"remove-pages\"", "app = \"paint\""),
+                "is not one of remove-pages",
+            ),
+            (
+                NESTED.replace(
+                    "mode = \"app\"\napp = \"remove-pages\"",
+                    "app = \"remove-pages\"",
+                ),
+                "needs mode = \"app\"",
+            ),
+            (
+                NESTED.replace(
+                    "mode = \"app\"\napp = \"remove-pages\"\n",
+                    "mode = \"app\"\n",
+                ),
+                "names its screen",
+            ),
+            (
+                NESTED.replace(
+                    "mode = \"choice\"\ndefault = \"right\"",
+                    "mode = \"choice\"\ndefault = \"right\"\noutput = \"x.pdf\"",
+                ),
+                "has no action, output or app",
+            ),
+            (
+                NESTED.replace("  id = \"left\"", "  id = \"right\""),
+                "defined twice",
+            ),
+            (
+                MERGE.replace("label = \"Merge\"", "label = \"Merge\"\nmode = \"choice\""),
+                "has no action, output or app",
+            ),
+            (
+                MERGE.replace("output = \"{stem} - merged.pdf\"\n", ""),
+                "needs an output name",
+            ),
+        ];
+        for (manifest, expected) in cases {
+            let catalog = load(&[("pack", &manifest)]);
+            let message = only_error(&catalog);
+            assert!(
+                message.contains(expected),
+                "expected {expected:?} in {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_worker_inside_children_drops_the_pack() {
+        let manifest = NESTED
+            .replace(
+                "requires_core = \">=0.1\"",
+                "requires_core = \">=0.1\"\nrequires_packs = [\"other\"]",
+            )
+            .replace(
+                "action = { worker = \"pdf-light\", op = \"rotate\", args = { degrees = 270 } }",
+                "action = { worker = \"other\", op = \"rotate\" }",
+            );
+        let catalog = load(&[("pdf-light", &manifest)]);
+        assert!(only_error(&catalog).contains("Needs the \"other\" pack"));
     }
 }

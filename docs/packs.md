@@ -18,8 +18,8 @@ packs/
 ```toml
 id = "pdf-light"              # lower-case letters, digits and dashes; unique
 name = "PDF Light"
-version = "0.5.0"             # semver
-requires_core = ">=0.5"       # semver range the Flick version must match
+version = "0.6.0"             # semver
+requires_core = ">=0.6"       # semver range the Flick version must match
 requires_packs = []           # other packs whose workers your slices use
 license = "AGPL-3.0"
 
@@ -39,7 +39,7 @@ icon = "merge"                # optional; one of the names below
 applies_to = ["pdf"]          # extensions, or ["*"] for any file
 min_files = 2                 # default 1
 # max_files = 10              # default: no limit
-mode = "combine"              # "combine" (default) or "each"
+runs = "once"                 # "once" (default) or "each", see Runs below
 output = "{stem} - merged.pdf"
 action = { worker = "pdf-light", op = "merge" }
 ```
@@ -50,18 +50,72 @@ number of files is within `min_files`..`max_files`.
 ### Icons
 
 The wheel draws slice icons itself, so `icon` is a name, not a file: `merge`, `split`, `rotate`,
-`image-pdf`, `convert`, `shrink`, `compress`, `copy`, `zip` or `pages`. Any other name stops the pack
+`image-pdf`, `convert`, `shrink`, `compress`, `copy`, `zip`, `pages`, `more`, `rotate-left`,
+`rotate-180`, `remove-pages`, `organize` or `target`. Any other name stops the pack
 from loading, so a typo shows up in Settings → Packs. Without an icon the slice shows its label only.
 
-### Modes
+### Tiers: `mode`
 
-- `mode = "combine"` (the default): the worker runs **once with every selected file** and makes one
+What happens when the user picks the slice:
+
+| `mode` | Use it when | What happens |
+|---|---|---|
+| `quick` (default) | No decision is needed | Runs as soon as the shortcut is released (merge, to PNG) |
+| `choice` | Up to about 8 fixed options | Hovering it opens its `children` as a sub-ring (rotate 90° right/left/180°) |
+| `app` | It needs a number, a page selection or text | Opens the Flick app window with the selected files loaded |
+
+Rule of thumb: no decision means `quick`; a few fixed options means `choice`; anything you would
+type or click through means `app`.
+
+```toml
+[[slices]]
+id = "rotate"
+label = "Rotate"
+icon = "rotate"
+applies_to = ["pdf"]
+mode = "choice"
+default = "right"             # optional: runs when the user releases over Rotate itself
+
+  [[slices.children]]         # children inherit applies_to, min_files and max_files
+  id = "right"                # becomes "pdf-light.rotate.right"
+  label = "90° right"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = 90 } }
+
+  [[slices.children]]
+  id = "pages"
+  label = "Pick pages…"
+  mode = "app"
+  app = "rotate-pages"        # a screen of the Flick app window
+  max_files = 1
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "organize" }
+```
+
+- A `choice` slice has 1 to 8 `children` and no `action`, `output` or `app` of its own. Releasing
+  over it runs its `default` child if it names one; otherwise nothing happens (the same as cancel).
+- Slices nest **2 levels** deep: the main ring and one sub-ring. (The format and loader are
+  recursive, so a third level only needs a higher limit in the core.)
+- An `app` slice names one of the built-in screens: `remove-pages`, `rotate-pages`,
+  `organize-pages`, `split-ranges` or `compress-target`. Its `action` and `output` are used when the
+  user presses Save in that screen, with the screen's choices added to `args`.
+- `args` (optional, on any `action`) are passed to the worker unchanged, so one op can serve several
+  children.
+- If more than 6 slices apply to a selection, the 6th slot becomes **More** and holds the rest, in
+  order. Positions never change by themselves: they follow the order in Settings, then manifest order.
+
+### Runs: `runs`
+
+- `runs = "once"` (the default): the worker runs **once with every selected file** and makes one
   result, named from the first file. Merge and images to PDF work like this.
-- `mode = "each"`: the worker runs **once per selected file**, each run in its own Job Object with the
+- `runs = "each"`: the worker runs **once per selected file**, each run in its own Job Object with the
   pack's limits, and each result is saved next to its own input. Split, rotate and the image
   conversions work like this. If one file fails, the others are still saved and the toast says which
   one failed and why. Cancel stops the job before the next file; files already saved stay, since they
   are complete.
+
+(Before Flick 0.6, `runs` was called `mode` with the values `combine` and `each`.)
 
 ### Output names
 
@@ -81,7 +135,7 @@ id = "split"
 label = "Split"
 icon = "split"
 applies_to = ["pdf"]
-mode = "each"                     # each selected PDF is split on its own
+runs = "each"                     # each selected PDF is split on its own
 output = "{stem} - page {n}.pdf"  # Report - page 01.pdf ... Report - page 12.pdf
 action = { worker = "pdf-light", op = "split" }
 ```

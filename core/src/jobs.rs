@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 
-use crate::packs::{Mode, PackSlice};
+use crate::packs::{PackSlice, Runs};
 
 /// Sorts paths by file name the way people expect: case-insensitive, with numbers compared by
 /// value, so "Chapter 2" comes before "Chapter 10".
@@ -200,9 +200,9 @@ where
     if inputs.is_empty() {
         return Err(JobError::BadInput("Nothing is selected.".into()));
     }
-    let groups: Vec<Vec<PathBuf>> = match slice.mode {
-        Mode::Combine => vec![inputs],
-        Mode::Each => inputs.into_iter().map(|p| vec![p]).collect(),
+    let groups: Vec<Vec<PathBuf>> = match slice.runs {
+        Runs::Once => vec![inputs],
+        Runs::Each => inputs.into_iter().map(|p| vec![p]).collect(),
     };
     let alone = groups.len() == 1;
 
@@ -412,6 +412,9 @@ mod run {
                 return Err(JobError::Cancelled);
             }
             let mut request = json!({ "op": slice.op, "inputs": group });
+            if !slice.args.is_null() {
+                request["args"] = slice.args.clone();
+            }
             match target {
                 Target::File(path) => request["output"] = json!(path),
                 Target::Folder(path) => request["output_dir"] = json!(path),
@@ -516,18 +519,17 @@ mod tests {
         assert!(!temp.exists());
     }
 
-    fn slice(mode: Mode, output: &str) -> PackSlice {
+    fn slice(runs: Runs, output: &str) -> PackSlice {
         PackSlice {
             id: "p.s".into(),
             label: "Split".into(),
-            icon: None,
             applies_to: vec!["*".into()],
             min_files: 1,
-            max_files: None,
-            mode,
+            runs,
             output: output.into(),
             worker: "p".into(),
             op: "s".into(),
+            ..PackSlice::default()
         }
     }
 
@@ -578,7 +580,7 @@ mod tests {
         let (dir, paths) = inputs(&["b.pdf", "a.pdf"]);
         let mut runs = Vec::new();
         let outcome = run_slice_with(
-            &slice(Mode::Combine, "{stem} - merged.pdf"),
+            &slice(Runs::Once, "{stem} - merged.pdf"),
             &paths,
             |group, target| {
                 runs.push(group.to_vec());
@@ -601,7 +603,7 @@ mod tests {
     fn each_runs_once_per_input_and_saves_next_to_it() {
         let (dir, paths) = inputs(&["b.png", "a.png"]);
         std::fs::write(dir.path().join("a.jpg"), b"taken").unwrap();
-        let outcome = run_slice_with(&slice(Mode::Each, "{stem}.jpg"), &paths, |group, target| {
+        let outcome = run_slice_with(&slice(Runs::Each, "{stem}.jpg"), &paths, |group, target| {
             assert_eq!(group.len(), 1);
             let Target::File(temp) = target else { panic!() };
             std::fs::write(temp, b"jpg").unwrap();
@@ -627,7 +629,7 @@ mod tests {
     fn each_keeps_going_after_one_file_fails() {
         let (dir, paths) = inputs(&["a.png", "b.png", "c.png"]);
         let outcome = run_slice_with(
-            &slice(Mode::Each, "{stem} - small.jpg"),
+            &slice(Runs::Each, "{stem} - small.jpg"),
             &paths,
             |group, target| {
                 let Target::File(temp) = target else { panic!() };
@@ -657,7 +659,7 @@ mod tests {
     #[test]
     fn a_lone_failure_is_the_jobs_error_and_leaves_nothing_behind() {
         let (dir, paths) = inputs(&["a.png"]);
-        let err = run_slice_with(&slice(Mode::Each, "{stem}.jpg"), &paths, |_, target| {
+        let err = run_slice_with(&slice(Runs::Each, "{stem}.jpg"), &paths, |_, target| {
             let Target::File(temp) = target else { panic!() };
             std::fs::write(temp, b"half").unwrap();
             Err(JobError::Worker("a.png could not be read.".into()))
@@ -668,7 +670,7 @@ mod tests {
 
         // When every file fails, the first reason is shown and the rest are counted.
         let (dir, paths) = inputs(&["a.png", "b.png", "c.png"]);
-        let err = run_slice_with(&slice(Mode::Each, "{stem}.jpg"), &paths, |_, _| {
+        let err = run_slice_with(&slice(Runs::Each, "{stem}.jpg"), &paths, |_, _| {
             Err(JobError::Worker("Not an image.".into()))
         })
         .unwrap_err();
@@ -683,7 +685,7 @@ mod tests {
     fn cancel_stops_an_each_job() {
         let (_dir, paths) = inputs(&["a.png", "b.png", "c.png"]);
         let mut runs = 0;
-        let err = run_slice_with(&slice(Mode::Each, "{stem}.jpg"), &paths, |_, target| {
+        let err = run_slice_with(&slice(Runs::Each, "{stem}.jpg"), &paths, |_, target| {
             runs += 1;
             if runs == 2 {
                 return Err(JobError::Cancelled);
@@ -703,7 +705,7 @@ mod tests {
         // "Report - page 03.pdf" is taken, so that one becomes "(1)".
         std::fs::write(dir.path().join("Report - page 03.pdf"), b"keep").unwrap();
         let outcome = run_slice_with(
-            &slice(Mode::Each, "{stem} - page {n}.pdf"),
+            &slice(Runs::Each, "{stem} - page {n}.pdf"),
             &paths,
             split_into(12),
         )
@@ -734,7 +736,7 @@ mod tests {
         // Under ten files there is no padding.
         let (dir, paths) = inputs(&["a.pdf"]);
         run_slice_with(
-            &slice(Mode::Each, "{stem} - page {n}.pdf"),
+            &slice(Runs::Each, "{stem} - page {n}.pdf"),
             &paths,
             split_into(2),
         )
@@ -751,7 +753,7 @@ mod tests {
         // The worker fails after writing some files.
         let (dir, paths) = inputs(&["a.pdf"]);
         let mut half = split_into(3);
-        let err = run_slice_with(&slice(Mode::Each, template), &paths, |group, target| {
+        let err = run_slice_with(&slice(Runs::Each, template), &paths, |group, target| {
             half(group, target)?;
             Err(JobError::Worker("a.pdf is password protected.".into()))
         })
@@ -764,7 +766,7 @@ mod tests {
         let outside = paths[1].clone();
         let mut pages = split_into(2);
         let err = run_slice_with(
-            &slice(Mode::Combine, template),
+            &slice(Runs::Once, template),
             &paths[..1],
             |group, target| {
                 let mut files = pages(group, target)?;
@@ -778,7 +780,7 @@ mod tests {
 
         // No files at all is an error too.
         let (dir, paths) = inputs(&["a.pdf"]);
-        let err = run_slice_with(&slice(Mode::Each, template), &paths, |_, _| Ok(Vec::new()))
+        let err = run_slice_with(&slice(Runs::Each, template), &paths, |_, _| Ok(Vec::new()))
             .unwrap_err();
         assert!(err.to_string().contains("did not make any files"), "{err}");
         assert_eq!(listing(dir.path()), ["a.pdf"]);

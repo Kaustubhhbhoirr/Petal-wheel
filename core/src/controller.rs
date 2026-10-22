@@ -24,7 +24,7 @@ use crate::selection::{foreground_window, selected_paths, Selection};
 use crate::supervisor::CancelToken;
 use crate::theme::{pick, Theme};
 use crate::toast::{Toast, Toaster};
-use crate::wheel::{cancel_radius, hit_test, Slice};
+use crate::wheel::{build_menu, cancel_radius, hit_test, Kind, Slice};
 
 /// How often the cursor is checked while the wheel is open (about 60 Hz).
 const TRACK_INTERVAL: Duration = Duration::from_millis(16);
@@ -94,11 +94,8 @@ impl Controller {
         let (slices, theme) = {
             let catalog = self.shared.catalog.read().unwrap();
             let config = self.shared.config.read().unwrap();
-            let slices: Vec<Slice> = catalog
-                .slices_for(&selection.paths, &config.slices)
-                .into_iter()
-                .map(Slice::from)
-                .collect();
+            let slices: Vec<Slice> =
+                build_menu(&catalog.tree_for(&selection.paths, &config.slices));
             (
                 slices,
                 Arc::new(pick(&self.shared.themes, &config.theme).clone()),
@@ -152,7 +149,17 @@ impl Controller {
         }
         self.overlay.hide();
 
-        if let Some(slice) = highlighted.map(|i| &slices[i]) {
+        // Releasing over a parent runs its default child, if it names one; otherwise nothing.
+        let chosen = highlighted
+            .map(|i| &slices[i])
+            .and_then(|slice| match slice.kind {
+                Kind::Parent => slice.default_child.map(|d| &slice.children[d]),
+                _ => Some(slice),
+            });
+        if let Some(slice) = chosen.filter(|s| s.kind == Kind::App) {
+            // App slices need input from the Flick app window before anything runs.
+            log(&format!("{} needs the app window", slice.id));
+        } else if let Some(slice) = chosen {
             let _ = self.jobs.send(Job {
                 slice_id: slice.id.clone(),
                 paths: selection.paths,

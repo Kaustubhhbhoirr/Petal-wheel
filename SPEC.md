@@ -232,7 +232,8 @@ label = "Merge"
 icon = "merge"                 # a name the wheel draws natively
 applies_to = ["pdf"]
 min_files = 2
-mode = "combine"               # or "each": one run per selected file
+runs = "once"                  # or "each": one run per selected file
+mode = "quick"                 # or "choice" (has children) or "app" (opens the Flick app window)
 output = "{stem} - merged.pdf" # "{n}" (e.g. "{stem} - page {n}.pdf") makes one file per page
 action = { worker = "pdf-light", op = "merge" }
 ```

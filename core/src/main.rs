@@ -331,10 +331,9 @@ fn sample_content(theme_id: Option<&str>) -> WheelContent {
         slices: labels
             .iter()
             .enumerate()
-            .map(|(i, label)| Slice {
-                id: format!("bench.{}", label.to_lowercase()),
-                label: label.to_string(),
-                icon: Some(["merge", "compress", "pages", "copy", "zip", "split"][i].to_string()),
+            .map(|(i, label)| {
+                let icon = ["merge", "compress", "pages", "copy", "zip", "split"][i];
+                Slice::run(&format!("bench.{}", label.to_lowercase()), label, icon)
             })
             .collect(),
         caption: "2 PDFs".into(),

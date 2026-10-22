@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use flick_core::config::SliceConfig;
-use flick_core::packs::{load_dir, Catalog, Mode, ICONS};
+use flick_core::packs::{load_dir, Catalog, Runs, ICONS};
 
 fn bundled() -> Catalog {
     let packs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../packs");
@@ -30,7 +30,7 @@ fn bundled_packs_load_cleanly() {
 
     let merge = catalog.find("pdf-light.merge").expect("merge slice");
     assert_eq!(merge.1.op, "merge");
-    assert_eq!(merge.1.mode, Mode::Combine);
+    assert_eq!(merge.1.runs, Runs::Once);
     assert_eq!(
         ids(&catalog, &["a.pdf", "b.pdf"]),
         ["pdf-light.merge", "pdf-light.split", "pdf-light.rotate"]
@@ -41,12 +41,12 @@ fn bundled_packs_load_cleanly() {
     );
 
     let split = catalog.find("pdf-light.split").unwrap().1;
-    assert_eq!(split.mode, Mode::Each);
+    assert_eq!(split.runs, Runs::Each);
     assert!(split.multi_output());
 
     let (worker, to_pdf) = catalog.find("image.to-pdf").expect("images to PDF slice");
     assert!(worker.worker_exe.ends_with("image-tools.exe"));
-    assert_eq!(to_pdf.mode, Mode::Combine);
+    assert_eq!(to_pdf.runs, Runs::Once);
     assert_eq!(
         ids(&catalog, &["a.jpg", "b.PNG"]),
         ["image.to-pdf", "image.shrink"]
