@@ -50,12 +50,26 @@ pub fn slice_angle(index: usize, count: usize) -> f64 {
     -std::f64::consts::FRAC_PI_2 + index as f64 * std::f64::consts::TAU / count as f64
 }
 
+/// How far from the centre releasing still cancels, in logical pixels: the visible centre circle
+/// of each layout, so "back to the middle" means what it looks like.
+pub fn cancel_radius(style: crate::theme::Style) -> f64 {
+    use crate::theme::Style;
+    match style {
+        // The centre circle is 34 px; a little extra makes it easy to hit.
+        Style::Orbit => 50.0,
+        // The inner circle, where the slices start.
+        Style::Pie => 60.0,
+        // The large centre disc inside the ring.
+        Style::Ring => 96.0,
+    }
+}
+
 /// Which slice the cursor points at, given its offset from the wheel centre in logical pixels.
 ///
 /// Distance beyond the ring still counts, so a quick flick past the edge picks the slice in that
-/// direction. Inside the dead zone nothing is picked.
-pub fn hit_test(dx: f64, dy: f64, count: usize) -> Option<usize> {
-    if count == 0 || dx.hypot(dy) < DEADZONE {
+/// direction. Closer to the centre than `cancel_radius` nothing is picked, and releasing cancels.
+pub fn hit_test(dx: f64, dy: f64, count: usize, cancel_radius: f64) -> Option<usize> {
+    if count == 0 || dx.hypot(dy) < cancel_radius {
         return None;
     }
     let step = std::f64::consts::TAU / count as f64;
@@ -72,30 +86,43 @@ mod tests {
 
     #[test]
     fn deadzone_and_empty_wheel_pick_nothing() {
-        assert_eq!(hit_test(5.0, 5.0, 6), None);
-        assert_eq!(hit_test(100.0, 0.0, 0), None);
+        assert_eq!(hit_test(5.0, 5.0, 6, DEADZONE), None);
+        assert_eq!(hit_test(100.0, 0.0, 0, DEADZONE), None);
     }
 
     #[test]
     fn four_slices_follow_the_compass_clockwise() {
-        assert_eq!(hit_test(0.0, -100.0, 4), Some(0)); // up
-        assert_eq!(hit_test(100.0, 0.0, 4), Some(1)); // right
-        assert_eq!(hit_test(0.0, 100.0, 4), Some(2)); // down
-        assert_eq!(hit_test(-100.0, 0.0, 4), Some(3)); // left
+        assert_eq!(hit_test(0.0, -100.0, 4, DEADZONE), Some(0)); // up
+        assert_eq!(hit_test(100.0, 0.0, 4, DEADZONE), Some(1)); // right
+        assert_eq!(hit_test(0.0, 100.0, 4, DEADZONE), Some(2)); // down
+        assert_eq!(hit_test(-100.0, 0.0, 4, DEADZONE), Some(3)); // left
     }
 
     #[test]
     fn boundaries_split_between_neighbours() {
         // With 4 slices the boundary between 0 and 1 is up-right at 45 degrees.
-        assert_eq!(hit_test(10.0, -100.0, 4), Some(0));
-        assert_eq!(hit_test(100.0, -10.0, 4), Some(1));
+        assert_eq!(hit_test(10.0, -100.0, 4, DEADZONE), Some(0));
+        assert_eq!(hit_test(100.0, -10.0, 4, DEADZONE), Some(1));
         // Just left of straight up wraps to slice 0, not the last slice.
-        assert_eq!(hit_test(-10.0, -100.0, 4), Some(0));
+        assert_eq!(hit_test(-10.0, -100.0, 4, DEADZONE), Some(0));
+    }
+
+    #[test]
+    fn releasing_inside_the_visible_centre_cancels() {
+        use crate::theme::Style;
+        // Back near the middle but not exactly on it: still a cancel, in every layout.
+        for style in [Style::Orbit, Style::Pie, Style::Ring] {
+            let zone = cancel_radius(style);
+            assert_eq!(hit_test(30.0, 25.0, 3, zone), None, "{style:?}");
+            assert_eq!(hit_test(0.0, -(zone + 10.0), 3, zone), Some(0), "{style:?}");
+        }
+        // Orbit's centre circle is 34 px: anywhere on it cancels.
+        assert_eq!(hit_test(0.0, 34.0, 3, cancel_radius(Style::Orbit)), None);
     }
 
     #[test]
     fn flicking_past_the_ring_still_counts() {
-        assert_eq!(hit_test(0.0, 900.0, 4), Some(2));
+        assert_eq!(hit_test(0.0, 900.0, 4, DEADZONE), Some(2));
     }
 
     #[test]
@@ -103,7 +130,7 @@ mod tests {
         for count in 1..=10 {
             for index in 0..count {
                 let a = slice_angle(index, count);
-                let hit = hit_test(100.0 * a.cos(), 100.0 * a.sin(), count);
+                let hit = hit_test(100.0 * a.cos(), 100.0 * a.sin(), count, DEADZONE);
                 assert_eq!(hit, Some(index), "count {count} index {index}");
             }
         }

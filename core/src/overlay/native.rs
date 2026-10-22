@@ -422,6 +422,18 @@ impl Frame<'_> {
                 )?;
             }
         }
+        // In the centre with actions around: say what letting go does.
+        if self.hovered.is_none() && count > 0 {
+            self.text(
+                "Release to cancel",
+                &self.fonts.small,
+                c,
+                c + 52.0 * s,
+                140.0,
+                16.0,
+                colors.muted,
+            )?;
+        }
         Ok(())
     }
 
@@ -562,7 +574,7 @@ impl Frame<'_> {
                 )?;
                 if count > 0 {
                     self.text(
-                        "Move toward an action",
+                        "Release here to cancel",
                         &self.fonts.small,
                         c,
                         c + 22.0 * s,
@@ -594,6 +606,26 @@ impl Frame<'_> {
                 )?;
                 self.text(
                     &self.content.caption,
+                    &self.fonts.small,
+                    c,
+                    c + 12.0 * s,
+                    width,
+                    16.0,
+                    colors.muted,
+                )
+            }
+            None if !self.content.slices.is_empty() => {
+                self.text(
+                    &self.content.caption,
+                    &self.fonts.title,
+                    c,
+                    c - 8.0 * s,
+                    width,
+                    22.0,
+                    colors.text,
+                )?;
+                self.text(
+                    "Release to cancel",
                     &self.fonts.small,
                     c,
                     c + 12.0 * s,

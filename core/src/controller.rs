@@ -24,7 +24,7 @@ use crate::selection::{foreground_window, selected_paths, Selection};
 use crate::supervisor::CancelToken;
 use crate::theme::{pick, Theme};
 use crate::toast::{Toast, Toaster};
-use crate::wheel::{hit_test, Slice};
+use crate::wheel::{cancel_radius, hit_test, Slice};
 
 /// How often the cursor is checked while the wheel is open (about 60 Hz).
 const TRACK_INTERVAL: Duration = Duration::from_millis(16);
@@ -109,6 +109,7 @@ impl Controller {
             slices: slices.clone(),
             theme,
         };
+        let cancel_zone = cancel_radius(content.theme.style);
         let placement = Placement {
             x: centre.x,
             y: centre.y,
@@ -140,7 +141,7 @@ impl Controller {
                     let now = cursor();
                     let dx = (now.x - centre.x) as f64 / placement.scale;
                     let dy = (now.y - centre.y) as f64 / placement.scale;
-                    let hit = hit_test(dx, dy, slices.len());
+                    let hit = hit_test(dx, dy, slices.len(), cancel_zone);
                     if hit != highlighted {
                         highlighted = hit;
                         self.overlay.highlight(hit);
