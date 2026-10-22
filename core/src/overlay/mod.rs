@@ -9,14 +9,20 @@
 pub mod native;
 pub mod webview;
 
+use std::sync::Arc;
+
+use crate::theme::Theme;
 use crate::wheel::Slice;
 
-/// What the renderer draws: the slices and a caption for the centre.
+/// What the renderer draws: the slices, a caption for the centre, and the look.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WheelContent {
     pub slices: Vec<Slice>,
     /// Shown in the centre when no slice is highlighted, e.g. "2 PDFs".
     pub caption: String,
+    /// Used by the native renderer; the WebView2 page keeps its own fixed look.
+    #[serde(skip)]
+    pub theme: Arc<Theme>,
 }
 
 /// Where to put the wheel: the cursor position in physical pixels and the monitor scale.

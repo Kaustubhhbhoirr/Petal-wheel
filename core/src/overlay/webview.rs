@@ -54,6 +54,7 @@ impl WebviewOverlay {
             let empty = WheelContent {
                 slices: Vec::new(),
                 caption: String::new(),
+                theme: std::sync::Arc::new(crate::theme::Theme::built_in()),
             };
             self.build(&empty)?;
         }

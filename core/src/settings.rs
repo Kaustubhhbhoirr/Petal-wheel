@@ -14,6 +14,7 @@ use crate::controller::Shared;
 use crate::hotkey::{HotkeyManager, Shortcut};
 use crate::log::{log, log_path};
 use crate::packs::{PackError, CORE_VERSION};
+use crate::theme::{Rgba, Style, ThemeError};
 
 const LABEL: &str = "settings";
 
@@ -23,6 +24,7 @@ pub struct AppState {
     pub hotkeys: Arc<HotkeyManager>,
     pub config_path: Option<PathBuf>,
     pub packs_dir: Option<PathBuf>,
+    pub theme_errors: Vec<ThemeError>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +39,28 @@ pub struct SettingsView {
     config_path: Option<PathBuf>,
     packs_dir: Option<PathBuf>,
     log_path: Option<PathBuf>,
+    theme: String,
+    themes: Vec<ThemeView>,
+    theme_errors: Vec<ThemeError>,
+}
+
+#[derive(Serialize)]
+struct ThemeView {
+    id: String,
+    name: String,
+    style: Style,
+    /// CSS colours for the picker's swatches.
+    swatches: [String; 3],
+}
+
+fn css(color: Rgba) -> String {
+    format!(
+        "rgba({}, {}, {}, {:.3})",
+        (color.r * 255.0).round(),
+        (color.g * 255.0).round(),
+        (color.b * 255.0).round(),
+        color.a
+    )
 }
 
 #[derive(Serialize)]
@@ -115,6 +139,25 @@ pub fn get_settings(state: State<'_, AppState>) -> SettingsView {
         config_path: state.config_path.clone(),
         packs_dir: state.packs_dir.clone(),
         log_path: log_path(),
+        theme: crate::theme::pick(&state.shared.themes, &config.theme)
+            .id
+            .clone(),
+        themes: state
+            .shared
+            .themes
+            .iter()
+            .map(|t| ThemeView {
+                id: t.id.clone(),
+                name: t.name.clone(),
+                style: t.style,
+                swatches: [
+                    css(t.colors.surface),
+                    css(t.colors.accent),
+                    css(t.colors.text),
+                ],
+            })
+            .collect(),
+        theme_errors: state.theme_errors.clone(),
     }
 }
 
@@ -135,11 +178,16 @@ pub fn save_settings(
     shortcut: String,
     order: Vec<String>,
     disabled: Vec<String>,
+    theme: String,
 ) -> Result<(), String> {
+    if !state.shared.themes.iter().any(|t| t.id == theme) {
+        return Err(format!("The theme \"{theme}\" is not installed."));
+    }
     let parsed: Shortcut = shortcut.parse().map_err(|e| format!("{e}"))?;
     state.hotkeys.set(parsed).map_err(|e| e.to_string())?;
     let config = Config {
         shortcut: parsed.to_string(),
+        theme,
         slices: SliceConfig { order, disabled },
     };
     *state.shared.config.write().unwrap() = config.clone();
@@ -180,7 +228,7 @@ pub fn open_settings(app: &AppHandle) {
     }
     let result = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("settings.html".into()))
         .title("Flick Settings")
-        .inner_size(600.0, 640.0)
+        .inner_size(600.0, 800.0)
         .min_inner_size(480.0, 480.0)
         .center()
         .focused(true)

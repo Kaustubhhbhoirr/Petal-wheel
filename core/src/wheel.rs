@@ -8,9 +8,20 @@ pub const DEADZONE: f64 = 28.0;
 /// Room around the ring for anti-aliasing and the hover glow.
 pub const PADDING: f64 = 12.0;
 
-/// Width and height of the wheel window in logical pixels.
+/// Width and height of the WebView2 wheel window in logical pixels.
 pub fn window_size() -> f64 {
     2.0 * (OUTER_RADIUS + PADDING)
+}
+
+/// Width and height of the native wheel window for a theme style, in logical pixels: room for
+/// the wheel, labels drawn outside it, and the shadow.
+pub fn window_size_for(style: crate::theme::Style) -> f64 {
+    use crate::theme::Style;
+    match style {
+        Style::Orbit => 470.0,
+        Style::Pie => 370.0,
+        Style::Ring => 490.0,
+    }
 }
 
 /// What a renderer needs to draw one slice. Which slices exist comes from packs
@@ -19,6 +30,8 @@ pub fn window_size() -> f64 {
 pub struct Slice {
     pub id: String,
     pub label: String,
+    /// Icon name from the pack manifest (see [`crate::icons::path_for`]).
+    pub icon: Option<String>,
 }
 
 impl From<&crate::packs::PackSlice> for Slice {
@@ -26,6 +39,7 @@ impl From<&crate::packs::PackSlice> for Slice {
         Self {
             id: slice.id.clone(),
             label: slice.label.clone(),
+            icon: slice.icon.clone(),
         }
     }
 }

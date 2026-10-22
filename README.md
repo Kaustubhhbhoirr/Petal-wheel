@@ -13,8 +13,9 @@ Select a file, press a shortcut, flick to an action. No uploads, no ads, no subs
 3. Move toward a slice and release. The result is saved next to the original.
 4. A small card in the corner shows progress (with Cancel), then **Open** and **Show in folder**.
 
-Settings (tray icon → Settings…) lets you record a new shortcut, reorder or turn off actions, and see
-installed packs. They are saved in a plain file, `%APPDATA%\Flick\config.toml`.
+Settings (tray icon → Settings…) lets you record a new shortcut, pick the wheel's look (Orbit by
+default; Glass pie, Slim ring and Fluent light are included as [themes](docs/themes.md)), reorder or
+turn off actions, and see installed packs. They are saved in a plain file, `%APPDATA%\Flick\config.toml`.
 
 Originals are never modified. If `report.pdf` already has a `report.docx` next to it, the output becomes
 `report (1).docx`.
@@ -41,9 +42,10 @@ A frozen or crashing conversion only kills its own worker. The core stays respon
 |---|---|
 | `core/` | Tauri 2 tray app: hotkey, selection reader, wheel, toast, pack loader, supervisor |
 | `packs/` | Pack manifests (`pack.toml`); each pack adds wheel actions and names its worker |
+| `themes/` | Wheel themes: a layout style and colours per JSON file |
 | `workers/pdf-light/` | Native Rust PDF worker (merge; split and friends later) |
 | `ui/` | Settings window, plus the WebView2 wheel kept from the renderer comparison |
-| `docs/` | Architecture, [how to make a pack](docs/packs.md), spike results |
+| `docs/` | Architecture, [how to make a pack](docs/packs.md), [how to make a theme](docs/themes.md), spike results |
 | `scripts/` | Measurement and end-to-end test scripts (PowerShell) |
 | `SPEC.md` | Full spec and roadmap |
 

@@ -67,3 +67,13 @@ Probe: `cargo run -p flick-core --example selection_probe [-- --foreground 3]`.
 Gotcha found while testing: `ShowWindow`/`SetTimer` send messages back into a window procedure
 synchronously, so procedures use `try_borrow_mut` on their thread-local state and leave re-entrant
 messages to `DefWindowProcW`.
+
+## Wheel themes
+
+The native wheel draws one of three layouts (`core/src/overlay/native.rs`): **orbit** (default),
+**pie** and **ring**, coloured by a theme from `themes/*.json` (`core/src/theme.rs`, format in
+[themes.md](themes.md)). The controller attaches the chosen theme to each `WheelContent`, so a
+change in Settings applies on the next open. Icons are stroke paths kept as SVG path data
+(`core/src/icons.rs`), parsed once into Direct2D geometry and drawn with a transform. Labels drawn
+outside the wheel sit on a pill in the centre colour so they stay readable on any background.
+Shadows are stacked translucent circles, because the software render target has no blur effect.

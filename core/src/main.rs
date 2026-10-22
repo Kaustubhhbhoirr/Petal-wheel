@@ -14,6 +14,7 @@ use flick_core::overlay::webview::{PaintSignal, WebviewOverlay};
 use flick_core::overlay::{Overlay, Placement, WheelContent};
 use flick_core::packs::{self, Catalog, PackError};
 use flick_core::settings::{self, open_settings, AppState};
+use flick_core::theme::{self, Theme};
 use flick_core::toast::{Toast, ToastWindow, Toaster};
 use flick_core::wheel::Slice;
 use tauri::menu::{Menu, MenuItem};
@@ -42,17 +43,19 @@ impl Renderer {
 
 /// Command line, mostly for testing and measurements:
 ///
-///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Alt+Space"] [--open-once]
-///   flick --bench <renderer> [--runs N] [--out results.json]
+///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Alt+Space"] [--theme orbit] [--open-once] [--settings]
+///   flick --bench <renderer> [--runs N] [--out results.json] [--theme orbit]
 ///
-/// `--shortcut` applies to this run only; Settings changes the saved one.
+/// `--shortcut` and `--theme` apply to this run only; Settings changes the saved ones.
 struct Args {
     renderer: Renderer,
     shortcut: Option<Shortcut>,
+    theme: Option<String>,
     bench: bool,
     runs: usize,
     out: Option<PathBuf>,
     open_once: bool,
+    open_settings: bool,
 }
 
 impl Args {
@@ -60,10 +63,12 @@ impl Args {
         let mut args = Args {
             renderer: Renderer::Native,
             shortcut: None,
+            theme: None,
             bench: false,
             runs: 20,
             out: None,
             open_once: false,
+            open_settings: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(arg) = it.next() {
@@ -83,9 +88,11 @@ impl Args {
                         Err(e) => log(&format!("ignoring shortcut {text:?}: {e}")),
                     }
                 }
+                "--theme" => args.theme = it.next(),
                 "--runs" => args.runs = it.next().and_then(|n| n.parse().ok()).unwrap_or(20),
                 "--out" => args.out = it.next().map(PathBuf::from),
                 "--open-once" => args.open_once = true,
+                "--settings" => args.open_settings = true,
                 other => log(&format!("ignoring unknown argument {other:?}")),
             }
         }
@@ -111,17 +118,22 @@ fn main() {
             if args.bench {
                 let handle = app.handle().clone();
                 let (runs, out, renderer) = (args.runs, args.out.clone(), args.renderer);
+                let theme = args.theme.clone();
                 std::thread::spawn(move || {
-                    bench(&*overlay, renderer, runs, out);
+                    bench(&*overlay, renderer, runs, out, theme.as_deref());
                     handle.exit(0);
                 });
                 return Ok(());
             }
             if args.open_once {
                 let overlay = overlay.clone();
-                std::thread::spawn(move || open_once(&*overlay));
+                let theme = args.theme.clone();
+                std::thread::spawn(move || open_once(&*overlay, theme.as_deref()));
             }
-            start(app.handle(), overlay, args.shortcut)?;
+            start(app.handle(), overlay, args.shortcut, args.theme.clone())?;
+            if args.open_settings {
+                open_settings(app.handle());
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -146,6 +158,7 @@ fn start(
     app: &AppHandle,
     overlay: Arc<dyn Overlay>,
     shortcut_override: Option<Shortcut>,
+    theme_override: Option<String>,
 ) -> Result<(), String> {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -153,7 +166,7 @@ fn start(
         .unwrap_or_default();
 
     let config_path = config::config_path();
-    let config = match &config_path {
+    let mut config = match &config_path {
         Some(path) => {
             let (config, warning) = config::load(path);
             if let Some(warning) = warning {
@@ -163,14 +176,31 @@ fn start(
         }
         None => config::Config::default(),
     };
+    if let Some(theme) = theme_override {
+        config.theme = theme;
+    }
 
     let packs_dir = packs::default_dir(&exe_dir);
     let catalog = load_packs(packs_dir.as_deref(), &exe_dir);
+    let (themes, theme_errors) = theme::load_dir(theme::default_dir(&exe_dir).as_deref());
+    for error in &theme_errors {
+        log(&format!(
+            "theme {}: {}",
+            error.file.display(),
+            error.message
+        ));
+    }
+    log(&format!(
+        "loaded {} theme(s); using {}",
+        themes.len(),
+        theme::pick(&themes, &config.theme).id
+    ));
 
     let toaster: Arc<dyn Toaster> = Arc::new(ToastWindow::start()?);
     let shared = Arc::new(Shared {
         catalog: RwLock::new(catalog),
         config: RwLock::new(config.clone()),
+        themes,
     });
 
     let (tx, rx) = mpsc::channel();
@@ -214,6 +244,7 @@ fn start(
         hotkeys,
         config_path,
         packs_dir,
+        theme_errors,
     });
     Ok(())
 }
@@ -287,7 +318,7 @@ fn screen_centre() -> Placement {
 }
 
 /// Six slices with realistic labels, for measurements independent of installed packs.
-fn sample_content() -> WheelContent {
+fn sample_content(theme_id: Option<&str>) -> WheelContent {
     let labels = [
         "Merge",
         "Compress all",
@@ -299,19 +330,25 @@ fn sample_content() -> WheelContent {
     WheelContent {
         slices: labels
             .iter()
-            .map(|label| Slice {
+            .enumerate()
+            .map(|(i, label)| Slice {
                 id: format!("bench.{}", label.to_lowercase()),
                 label: label.to_string(),
+                icon: Some(["merge", "compress", "pages", "copy", "zip", "split"][i].to_string()),
             })
             .collect(),
         caption: "2 PDFs".into(),
+        theme: Arc::new(installed_theme(theme_id)),
     }
 }
 
 /// Shows and hides the wheel once, so idle measurements reflect a Flick that has been used.
-fn open_once(overlay: &dyn Overlay) {
+fn open_once(overlay: &dyn Overlay, theme: Option<&str>) {
     std::thread::sleep(Duration::from_secs(2));
-    if overlay.show(screen_centre(), &sample_content()).is_ok() {
+    if overlay
+        .show(screen_centre(), &sample_content(theme))
+        .is_ok()
+    {
         std::thread::sleep(Duration::from_millis(300));
         overlay.hide();
         log("open-once done");
@@ -319,8 +356,14 @@ fn open_once(overlay: &dyn Overlay) {
 }
 
 /// Opens and closes the wheel `runs` times and records how long each open took.
-fn bench(overlay: &dyn Overlay, renderer: Renderer, runs: usize, out: Option<PathBuf>) {
-    let content = sample_content();
+fn bench(
+    overlay: &dyn Overlay,
+    renderer: Renderer,
+    runs: usize,
+    out: Option<PathBuf>,
+    theme: Option<&str>,
+) {
+    let content = sample_content(theme);
     let at = screen_centre();
     let mut times = Vec::with_capacity(runs);
     std::thread::sleep(Duration::from_millis(500));
@@ -360,4 +403,14 @@ fn bench(overlay: &dyn Overlay, renderer: Renderer, runs: usize, out: Option<Pat
     if let Some(path) = out {
         let _ = std::fs::write(path, serde_json::to_string_pretty(&result).unwrap());
     }
+}
+
+/// The installed theme with this id (or the default), for runs that do not load the full app.
+fn installed_theme(id: Option<&str>) -> Theme {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default();
+    let (themes, _) = theme::load_dir(theme::default_dir(&exe_dir).as_deref());
+    theme::pick(&themes, id.unwrap_or(theme::DEFAULT_THEME)).clone()
 }

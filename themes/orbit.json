@@ -1,0 +1,16 @@
+{
+  "id": "orbit",
+  "name": "Orbit",
+  "style": "orbit",
+  "colors": {
+    "accent": "#ff8a4c",
+    "on_accent": "#1a0f08",
+    "surface": "#2a2c34",
+    "slice": "#2a2c34",
+    "centre": "#15161b",
+    "text": "#e6e7ec",
+    "muted": "#b9bbc4",
+    "outline": "#ffffff1f",
+    "shadow": "#00000073"
+  }
+}

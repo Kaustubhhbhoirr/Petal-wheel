@@ -1,0 +1,16 @@
+{
+  "id": "glass-pie",
+  "name": "Glass pie",
+  "style": "pie",
+  "colors": {
+    "accent": "#5aa2ff",
+    "on_accent": "#0c1626",
+    "surface": "#17181df0",
+    "slice": "#ffffff0d",
+    "centre": "#101115",
+    "text": "#e6e7ec",
+    "muted": "#a6a8b2",
+    "outline": "#ffffff14",
+    "shadow": "#00000073"
+  }
+}

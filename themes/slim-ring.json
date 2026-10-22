@@ -1,0 +1,16 @@
+{
+  "id": "slim-ring",
+  "name": "Slim ring",
+  "style": "ring",
+  "colors": {
+    "accent": "#38d39f",
+    "on_accent": "#06231a",
+    "surface": "#1b1c22",
+    "slice": "#1b1c22",
+    "centre": "#14151a",
+    "text": "#d9dbe2",
+    "muted": "#a9abb5",
+    "outline": "#ffffff1a",
+    "shadow": "#00000080"
+  }
+}
