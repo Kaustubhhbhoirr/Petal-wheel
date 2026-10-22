@@ -1,0 +1,20 @@
+[package]
+name = "image-tools"
+description = "Flick native image worker: images to PDF, PNG and JPG conversion, shrink."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Only the codecs Flick needs, and no rayon: the worker stays small and single-threaded.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
+lopdf = { version = "0.46", default-features = false }
+flate2 = "1"
+
+[dev-dependencies]
+tempfile = "3.27.0"

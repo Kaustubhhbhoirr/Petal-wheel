@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "workers/pdf-light"]
+members = ["core", "workers/pdf-light", "workers/image-tools"]
 
 [workspace.package]
 version = "0.5.0"

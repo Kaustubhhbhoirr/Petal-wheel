@@ -1,0 +1,54 @@
+# The Image pack: convert, shrink and combine pictures natively, no Python needed.
+id = "image"
+name = "Image"
+version = "0.5.0"
+requires_core = ">=0.5"
+requires_packs = []
+license = "AGPL-3.0"
+
+[worker]
+kind = "native"
+# Installed builds keep the worker here. During development it is found next to flick.exe.
+entry = "bin/image-tools.exe"
+
+[limits]
+# A 24-megapixel photo needs about 100 MB once decoded; leave room for resizing.
+memory_mb = 768
+time_seconds = 120
+cpu_percent = 50
+
+[[slices]]
+id = "to-pdf"
+label = "To PDF"
+icon = "image-pdf"
+applies_to = ["jpg", "jpeg", "png"]
+# All selected images go into one PDF, a page each, in name order.
+output = "{stem} - images.pdf"
+action = { worker = "image", op = "to_pdf" }
+
+[[slices]]
+id = "to-png"
+label = "To PNG"
+icon = "convert"
+applies_to = ["jpg", "jpeg", "webp", "bmp"]
+mode = "each"
+output = "{stem}.png"
+action = { worker = "image", op = "to_png" }
+
+[[slices]]
+id = "to-jpg"
+label = "To JPG"
+icon = "convert"
+applies_to = ["png", "webp", "bmp"]
+mode = "each"
+output = "{stem}.jpg"
+action = { worker = "image", op = "to_jpg" }
+
+[[slices]]
+id = "shrink"
+label = "Shrink"
+icon = "shrink"
+applies_to = ["jpg", "jpeg", "png", "webp", "bmp"]
+mode = "each"
+output = "{stem} - small.jpg"
+action = { worker = "image", op = "shrink" }

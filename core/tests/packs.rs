@@ -43,6 +43,24 @@ fn bundled_packs_load_cleanly() {
     let split = catalog.find("pdf-light.split").unwrap().1;
     assert_eq!(split.mode, Mode::Each);
     assert!(split.multi_output());
+
+    let (worker, to_pdf) = catalog.find("image.to-pdf").expect("images to PDF slice");
+    assert!(worker.worker_exe.ends_with("image-tools.exe"));
+    assert_eq!(to_pdf.mode, Mode::Combine);
+    assert_eq!(
+        ids(&catalog, &["a.jpg", "b.PNG"]),
+        ["image.to-pdf", "image.shrink"]
+    );
+    assert_eq!(
+        ids(&catalog, &["photo.jpeg"]),
+        ["image.to-pdf", "image.to-png", "image.shrink"]
+    );
+    assert_eq!(
+        ids(&catalog, &["shot.webp"]),
+        ["image.to-png", "image.to-jpg", "image.shrink"]
+    );
+    // Mixed PDFs and images get nothing.
+    assert!(ids(&catalog, &["a.pdf", "b.png"]).is_empty());
 }
 
 #[test]
