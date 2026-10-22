@@ -32,13 +32,13 @@ use super::{Overlay, Placement, WheelContent};
 use crate::gfx::{centred_rect, create_layered_window, draw_text, Surface, TextStyle};
 use crate::icons::{self, Segment};
 use crate::theme::{Rgba, Style, Theme};
-use crate::wheel::{self, slice_angle};
+use crate::wheel::{self, child_angle, child_step, slice_angle, sub_ring_radius, WheelState};
 
 const WM_COMMAND_READY: u32 = WM_APP + 1;
 
 enum Command {
     Show(Placement, WheelContent, Sender<Result<(), String>>),
-    Highlight(Option<usize>),
+    Update(WheelState),
     Hide,
 }
 
@@ -76,7 +76,7 @@ impl NativeOverlay {
                     icons: HashMap::new(),
                     placement: None,
                     content: None,
-                    highlighted: None,
+                    state: WheelState::default(),
                 };
                 STATE.with(|s| *s.borrow_mut() = Some((renderer, rx)));
                 let _ = ready_tx.send(Ok(hwnd.0 as isize));
@@ -116,8 +116,8 @@ impl Overlay for NativeOverlay {
         rx.recv().map_err(|e| e.to_string())?
     }
 
-    fn highlight(&self, index: Option<usize>) {
-        self.send(Command::Highlight(index));
+    fn update(&self, state: WheelState) {
+        self.send(Command::Update(state));
     }
 
     fn hide(&self) {
@@ -176,7 +176,7 @@ struct Renderer {
     icons: HashMap<&'static str, ID2D1PathGeometry>,
     placement: Option<Placement>,
     content: Option<WheelContent>,
-    highlighted: Option<usize>,
+    state: WheelState,
 }
 
 /// Everything a layout needs while drawing one frame.
@@ -188,6 +188,8 @@ struct Frame<'a> {
     theme: &'a Theme,
     content: &'a WheelContent,
     hovered: Option<usize>,
+    /// Hovered slice, open sub-ring and hovered child.
+    state: WheelState,
     /// Logical pixels to physical pixels.
     s: f32,
     /// Centre of the canvas in physical pixels.
@@ -200,7 +202,7 @@ impl Renderer {
             Command::Show(placement, content, done) => {
                 self.placement = Some(placement);
                 self.content = Some(content);
-                self.highlighted = None;
+                self.state = WheelState::default();
                 let result = unsafe { self.render() }.map_err(|e| e.to_string());
                 if result.is_ok() {
                     unsafe {
@@ -209,10 +211,18 @@ impl Renderer {
                 }
                 let _ = done.send(result);
             }
-            Command::Highlight(index) => {
-                if index != self.highlighted && self.content.is_some() {
-                    self.highlighted = index;
+            Command::Update(state) => {
+                if state != self.state && self.content.is_some() {
+                    let opening = state.open.is_some() && state.open != self.state.open;
+                    self.state = state;
+                    let started = std::time::Instant::now();
                     let _ = unsafe { self.render() };
+                    if opening {
+                        crate::log::log(&format!(
+                            "sub-ring drawn in {:.1} ms",
+                            started.elapsed().as_secs_f64() * 1000.0
+                        ));
+                    }
                 }
             }
             Command::Hide => {
@@ -287,7 +297,8 @@ impl Renderer {
             icons: &self.icons,
             theme: &content.theme,
             content,
-            hovered: self.highlighted,
+            hovered: self.state.hovered,
+            state: self.state,
             s: placement.scale as f32,
             c: size as f32 / 2.0,
         };
@@ -295,7 +306,8 @@ impl Renderer {
             Style::Orbit => frame.orbit(),
             Style::Pie => frame.pie(),
             Style::Ring => frame.ring(),
-        };
+        }
+        .and_then(|()| frame.fan());
         // Always end the frame, even if a layout failed part-way.
         let shown = self
             .surface
@@ -584,6 +596,67 @@ impl Frame<'_> {
                     )?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// The open parent's children: round buttons fanned out on a second orbit outside the main
+    /// ring, centred on the parent's direction. Shared by every style until each has its own.
+    unsafe fn fan(&self) -> windows::core::Result<()> {
+        let Some(parent_index) = self.state.open else {
+            return Ok(());
+        };
+        let Some(parent) = self.content.slices.get(parent_index) else {
+            return Ok(());
+        };
+        let colors = &self.theme.colors;
+        let t = &self.surface.target;
+        let (s, c) = (self.s, self.c);
+        let style = self.theme.style;
+        let radius = sub_ring_radius(style) as f32;
+        let step = child_step(style);
+        let parent_angle = slice_angle(parent_index, self.content.slices.len());
+        let count = parent.children.len();
+        let at = |r: f32, a: f64| (c + r * s * a.cos() as f32, c + r * s * a.sin() as f32);
+
+        // A faint arc behind the fan ties the children to their parent.
+        let first = child_angle(parent_angle, 0, count, step) - step / 2.0;
+        let last = child_angle(parent_angle, count.saturating_sub(1), count, step) + step / 2.0;
+        let track = self.arc(radius, first as f32, last as f32)?;
+        t.DrawGeometry(
+            &track,
+            &self.brush(colors.outline)?,
+            1.5 * s,
+            &self.strokes.dashed,
+        );
+
+        for (i, child) in parent.children.iter().enumerate() {
+            let a = child_angle(parent_angle, i, count, step);
+            let (x, y) = at(radius, a);
+            let hot = self.state.child == Some(i);
+            let r = if hot { 32.0 } else { 26.0 };
+            self.circle_shadow(x, y, r, colors.shadow)?;
+            let button = D2D1_ELLIPSE {
+                point: Vector2 { X: x, Y: y },
+                radiusX: r * s,
+                radiusY: r * s,
+            };
+            if hot {
+                t.FillEllipse(&button, &self.brush(colors.accent)?);
+            } else {
+                t.FillEllipse(&button, &self.brush(colors.surface)?);
+                t.DrawEllipse(&button, &self.brush(colors.outline)?, s, None);
+            }
+            let ink = if hot { colors.on_accent } else { colors.text };
+            self.icon(
+                child.icon.as_deref(),
+                x,
+                y,
+                if hot { 24.0 } else { 20.0 },
+                ink,
+            )?;
+            let (lx, ly) = at(radius + r + 20.0, a);
+            self.label(&child.label, lx, ly, hot)?;
         }
         Ok(())
     }

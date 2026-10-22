@@ -12,7 +12,7 @@ pub mod webview;
 use std::sync::Arc;
 
 use crate::theme::Theme;
-use crate::wheel::Slice;
+use crate::wheel::{Slice, WheelState};
 
 /// What the renderer draws: the slices, a caption for the centre, and the look.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -37,6 +37,7 @@ pub struct Placement {
 pub trait Overlay: Send + Sync {
     /// Shows the wheel centred on `at`. Returns once the first frame is on screen.
     fn show(&self, at: Placement, content: &WheelContent) -> Result<(), String>;
-    fn highlight(&self, index: Option<usize>);
+    /// Shows which slice is hovered, which sub-ring is open and which child is hovered.
+    fn update(&self, state: WheelState);
     fn hide(&self);
 }

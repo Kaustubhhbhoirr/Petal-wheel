@@ -115,8 +115,9 @@ impl Overlay for WebviewOverlay {
         Ok(())
     }
 
-    fn highlight(&self, index: Option<usize>) {
-        let _ = self.app.emit_to(LABEL, "wheel:highlight", index);
+    fn update(&self, state: crate::wheel::WheelState) {
+        // The WebView2 page only knows the main ring.
+        let _ = self.app.emit_to(LABEL, "wheel:highlight", state.hovered);
     }
 
     fn hide(&self) {

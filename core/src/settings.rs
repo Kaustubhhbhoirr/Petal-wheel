@@ -189,6 +189,8 @@ pub fn save_settings(
         shortcut: parsed.to_string(),
         theme,
         slices: SliceConfig { order, disabled },
+        // Not edited in Settings yet: keep what the file says.
+        ..state.shared.config.read().unwrap().clone()
     };
     *state.shared.config.write().unwrap() = config.clone();
     let path = state

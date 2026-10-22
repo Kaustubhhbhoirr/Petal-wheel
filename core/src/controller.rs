@@ -9,22 +9,25 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::POINT;
-use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
 
 use crate::config::Config;
 use crate::hotkey::HotkeyEvent;
 use crate::jobs::{self, JobError, Summary};
 use crate::log::log;
+use crate::mouse::RightClicks;
 use crate::overlay::{Overlay, Placement, WheelContent};
 use crate::packs::Catalog;
 use crate::selection::{foreground_window, selected_paths, Selection};
 use crate::supervisor::CancelToken;
 use crate::theme::{pick, Theme};
 use crate::toast::{Toast, Toaster};
-use crate::wheel::{build_menu, cancel_radius, hit_test, Kind, Slice};
+use crate::wheel::{build_menu, reach, Kind, Navigator, Slice, WheelState};
 
 /// How often the cursor is checked while the wheel is open (about 60 Hz).
 const TRACK_INTERVAL: Duration = Duration::from_millis(16);
@@ -84,14 +87,14 @@ impl Controller {
     fn session(&self, events: &Receiver<HotkeyEvent>) {
         let started = Instant::now();
         let window = foreground_window();
-        let centre = cursor();
+        let pointer = cursor();
 
         let selection = selected_paths(window).unwrap_or_else(|e| {
             log(&format!("selection failed: {e}"));
             Selection::default()
         });
         let selection_ms = ms(started.elapsed());
-        let (slices, theme) = {
+        let (slices, theme, delay) = {
             let catalog = self.shared.catalog.read().unwrap();
             let config = self.shared.config.read().unwrap();
             let slices: Vec<Slice> =
@@ -99,6 +102,7 @@ impl Controller {
             (
                 slices,
                 Arc::new(pick(&self.shared.themes, &config.theme).clone()),
+                Duration::from_millis(config.sub_ring_delay_ms()),
             )
         };
         let content = WheelContent {
@@ -106,11 +110,21 @@ impl Controller {
             slices: slices.clone(),
             theme,
         };
-        let cancel_zone = cancel_radius(content.theme.style);
+        let style = content.theme.style;
+        let scale = scale_at(pointer);
+
+        // Near a screen edge, move the wheel (and the pointer with it) inward so the main ring
+        // and any sub-ring stay fully on screen.
+        let centre = keep_on_screen(pointer, reach(style) * scale);
+        if centre != pointer {
+            unsafe {
+                let _ = SetCursorPos(centre.x, centre.y);
+            }
+        }
         let placement = Placement {
             x: centre.x,
             y: centre.y,
-            scale: scale_at(centre),
+            scale,
         };
         if let Err(e) = self.overlay.show(placement, &content) {
             log(&format!("wheel failed to open: {e}"));
@@ -123,48 +137,88 @@ impl Controller {
             slices.len()
         ));
 
-        let mut highlighted = None;
-        loop {
+        // Right-clicks close a sub-ring while the wheel is open (and nothing else gets them).
+        let (clicks_tx, clicks) = mpsc::channel();
+        let right_clicks = RightClicks::start(clicks_tx);
+        let mut nav = Navigator::new(style, delay);
+        let mut shown = WheelState::default();
+        let mut escape_was_down = false;
+        let cancelled = 'track: loop {
             match events.recv_timeout(TRACK_INTERVAL) {
-                Ok(HotkeyEvent::Released { .. }) => break,
+                Ok(HotkeyEvent::Released { .. }) => break false,
                 Ok(HotkeyEvent::Pressed) => {}
                 Err(RecvTimeoutError::Timeout) => {
-                    if unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) } < 0 {
-                        highlighted = None;
-                        // Wait for the release so it does not start a new session.
-                        let _ = events.recv();
-                        break;
+                    let escape = unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) } < 0;
+                    let backs = clicks.try_iter().count() + usize::from(escape && !escape_was_down);
+                    escape_was_down = escape;
+                    for _ in 0..backs {
+                        // Each Esc or right-click closes one level; with none open, it cancels.
+                        if !nav.back() {
+                            // Wait for the release so it does not start a new session.
+                            let _ = events.recv();
+                            break 'track true;
+                        }
                     }
                     let now = cursor();
-                    let dx = (now.x - centre.x) as f64 / placement.scale;
-                    let dy = (now.y - centre.y) as f64 / placement.scale;
-                    let hit = hit_test(dx, dy, slices.len(), cancel_zone);
-                    if hit != highlighted {
-                        highlighted = hit;
-                        self.overlay.highlight(hit);
+                    let dx = (now.x - centre.x) as f64 / scale;
+                    let dy = (now.y - centre.y) as f64 / scale;
+                    let state = nav.track(&slices, dx, dy, Instant::now());
+                    if state != shown {
+                        shown = state;
+                        self.overlay.update(state);
                     }
                 }
-                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Disconnected) => break true,
             }
-        }
+        };
+        drop(right_clicks);
         self.overlay.hide();
-
-        // Releasing over a parent runs its default child, if it names one; otherwise nothing.
-        let chosen = highlighted
-            .map(|i| &slices[i])
-            .and_then(|slice| match slice.kind {
-                Kind::Parent => slice.default_child.map(|d| &slice.children[d]),
-                _ => Some(slice),
-            });
-        if let Some(slice) = chosen.filter(|s| s.kind == Kind::App) {
-            // App slices need input from the Flick app window before anything runs.
-            log(&format!("{} needs the app window", slice.id));
-        } else if let Some(slice) = chosen {
-            let _ = self.jobs.send(Job {
-                slice_id: slice.id.clone(),
-                paths: selection.paths,
-            });
+        if cancelled {
+            return;
         }
+
+        // A hovered child runs; a hovered parent runs its default child, if any; the hub cancels.
+        match nav.picked(&slices) {
+            Some(slice) if slice.kind == Kind::App => {
+                // App slices need input from the Flick app window before anything runs.
+                log(&format!("{} needs the app window", slice.id));
+            }
+            Some(slice) if slice.kind == Kind::Run => {
+                let _ = self.jobs.send(Job {
+                    slice_id: slice.id.clone(),
+                    paths: selection.paths,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The wheel centre for a pointer at `point`: unchanged unless that would put part of a wheel
+/// reaching `reach` physical pixels outside the monitor's work area.
+fn keep_on_screen(point: POINT, reach: f64) -> POINT {
+    let reach = reach.ceil() as i32;
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    let work = unsafe {
+        let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return point;
+        }
+        info.rcWork
+    };
+    let clamp = |v: i32, lo: i32, hi: i32| {
+        if hi - lo < 2 * reach {
+            (lo + hi) / 2
+        } else {
+            v.clamp(lo + reach, hi - reach)
+        }
+    };
+    POINT {
+        x: clamp(point.x, work.left, work.right),
+        y: clamp(point.y, work.top, work.bottom),
     }
 }
 

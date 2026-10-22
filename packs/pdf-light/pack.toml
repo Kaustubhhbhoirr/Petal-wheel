@@ -31,16 +31,90 @@ id = "split"
 label = "Split"
 icon = "split"
 applies_to = ["pdf"]
-# Each selected PDF is split on its own. {n} is the page number, zero-padded so the files sort.
-runs = "each"
-output = "{stem} - page {n}.pdf"
-action = { worker = "pdf-light", op = "split" }
+mode = "choice"
+# Releasing over Split itself splits every page, as it did before it had choices.
+default = "pages"
+
+  [[slices.children]]
+  id = "pages"
+  label = "Every page"
+  icon = "split"
+  # Each selected PDF is split on its own. {n} is the page number, zero-padded so the files sort.
+  runs = "each"
+  output = "{stem} - page {n}.pdf"
+  action = { worker = "pdf-light", op = "split" }
+
+  [[slices.children]]
+  id = "ranges"
+  label = "By ranges…"
+  icon = "pages"
+  mode = "app"
+  app = "split-ranges"
+  max_files = 1
+  output = "{stem} - part {n}.pdf"
+  action = { worker = "pdf-light", op = "split_ranges" }
 
 [[slices]]
 id = "rotate"
 label = "Rotate"
 icon = "rotate"
 applies_to = ["pdf"]
-runs = "each"
-output = "{stem} - rotated.pdf"
-action = { worker = "pdf-light", op = "rotate" }
+mode = "choice"
+# Releasing over Rotate itself turns every page 90° clockwise, as it did before it had choices.
+default = "right"
+
+  [[slices.children]]
+  id = "right"
+  label = "90° right"
+  icon = "rotate"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = 90 } }
+
+  [[slices.children]]
+  id = "left"
+  label = "90° left"
+  icon = "rotate-left"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = -90 } }
+
+  [[slices.children]]
+  id = "half"
+  label = "180°"
+  icon = "rotate-180"
+  runs = "each"
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate", args = { degrees = 180 } }
+
+  [[slices.children]]
+  id = "pages"
+  label = "Pick pages…"
+  icon = "pages"
+  mode = "app"
+  app = "rotate-pages"
+  max_files = 1
+  output = "{stem} - rotated.pdf"
+  action = { worker = "pdf-light", op = "rotate" }
+
+[[slices]]
+id = "remove-pages"
+label = "Remove pages"
+icon = "remove-pages"
+applies_to = ["pdf"]
+max_files = 1
+mode = "app"
+app = "remove-pages"
+output = "{stem} - edited.pdf"
+action = { worker = "pdf-light", op = "remove_pages" }
+
+[[slices]]
+id = "organize"
+label = "Organize"
+icon = "organize"
+applies_to = ["pdf"]
+max_files = 1
+mode = "app"
+app = "organize-pages"
+output = "{stem} - organized.pdf"
+action = { worker = "pdf-light", op = "organize" }

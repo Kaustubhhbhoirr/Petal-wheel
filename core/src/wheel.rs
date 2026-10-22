@@ -13,14 +13,189 @@ pub fn window_size() -> f64 {
     2.0 * (OUTER_RADIUS + PADDING)
 }
 
-/// Width and height of the native wheel window for a theme style, in logical pixels: room for
-/// the wheel, labels drawn outside it, and the shadow.
-pub fn window_size_for(style: crate::theme::Style) -> f64 {
+/// Width and height of the native wheel window in logical pixels: room for the main ring, a
+/// sub-ring of children outside it, labels and the shadow. The same for every style, so a
+/// sub-ring never needs the window to grow.
+pub fn window_size_for(_style: crate::theme::Style) -> f64 {
+    740.0
+}
+
+/// How far from the centre the wheel reaches once a sub-ring is open (buttons, not labels), in
+/// logical pixels. The wheel is moved inward so this much always fits on the screen.
+pub fn reach(style: crate::theme::Style) -> f64 {
+    sub_ring_radius(style) + 40.0
+}
+
+/// Radius of the sub-ring of children for each style, in logical pixels.
+pub fn sub_ring_radius(style: crate::theme::Style) -> f64 {
     use crate::theme::Style;
     match style {
-        Style::Orbit => 470.0,
-        Style::Pie => 370.0,
-        Style::Ring => 490.0,
+        Style::Orbit => 215.0,
+        Style::Pie => 220.0,
+        Style::Ring => 240.0,
+    }
+}
+
+/// Beyond this distance from the centre, with a sub-ring open, the cursor points at children.
+/// It sits just outside the main ring's buttons or slices.
+pub fn main_ring_reach(style: crate::theme::Style) -> f64 {
+    use crate::theme::Style;
+    match style {
+        Style::Orbit => 170.0,
+        Style::Pie => 170.0,
+        Style::Ring => 168.0,
+    }
+}
+
+/// Angle between neighbouring children on a sub-ring: one button width plus a gap, measured
+/// along the sub-ring.
+pub fn child_step(style: crate::theme::Style) -> f64 {
+    72.0 / sub_ring_radius(style)
+}
+
+/// Centre angle of child `index` of `count`, fanned out symmetrically around its parent's angle.
+pub fn child_angle(parent_angle: f64, index: usize, count: usize, step: f64) -> f64 {
+    parent_angle + (index as f64 - (count as f64 - 1.0) / 2.0) * step
+}
+
+/// Which child of a fan the cursor points at, by angle. Only within half a step beyond the
+/// outermost children, so pointing far to the side picks nothing.
+pub fn hit_child(dx: f64, dy: f64, parent_angle: f64, count: usize, step: f64) -> Option<usize> {
+    let angle = dy.atan2(dx);
+    (0..count)
+        .map(|i| {
+            let diff = (angle - child_angle(parent_angle, i, count, step) + std::f64::consts::PI)
+                .rem_euclid(std::f64::consts::TAU)
+                - std::f64::consts::PI;
+            (i, diff.abs())
+        })
+        .filter(|(_, diff)| *diff <= step * 0.55)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+}
+
+/// What the wheel shows: the hovered main slice, which slice's sub-ring is open, and the
+/// hovered child in it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WheelState {
+    pub hovered: Option<usize>,
+    pub open: Option<usize>,
+    pub child: Option<usize>,
+}
+
+/// Turns cursor movement into wheel state, including opening a sub-ring after a short hover and
+/// closing it again. Pure logic (time is passed in), so it is unit-tested without a screen.
+///
+/// - Hovering a parent for `delay` opens its children as a sub-ring outside it.
+/// - With a sub-ring open, pointing beyond the main ring picks a child; pointing back at the
+///   main ring keeps the sub-ring until another main slice has been hovered for `delay`.
+/// - Entering the centre hub closes one level; [`Navigator::back`] (Esc, right-click) does too.
+/// - Releasing: a hovered child runs; a hovered parent runs its default child, if any; the hub
+///   cancels.
+pub struct Navigator {
+    style: crate::theme::Style,
+    delay: std::time::Duration,
+    state: WheelState,
+    dwell: Option<(usize, std::time::Instant)>,
+    in_hub: bool,
+}
+
+impl Navigator {
+    pub fn new(style: crate::theme::Style, delay: std::time::Duration) -> Self {
+        Self {
+            style,
+            delay,
+            state: WheelState::default(),
+            dwell: None,
+            in_hub: true,
+        }
+    }
+
+    pub fn state(&self) -> WheelState {
+        self.state
+    }
+
+    /// Updates the state from the cursor's offset from the centre, in logical pixels.
+    pub fn track(
+        &mut self,
+        menu: &[Slice],
+        dx: f64,
+        dy: f64,
+        now: std::time::Instant,
+    ) -> WheelState {
+        let distance = dx.hypot(dy);
+        let cancel = cancel_radius(self.style);
+        if distance < cancel {
+            // Entering the hub closes one level; staying in it does nothing more.
+            if !self.in_hub {
+                self.in_hub = true;
+                self.state.open = None;
+            }
+            self.state.hovered = None;
+            self.state.child = None;
+            self.dwell = None;
+            return self.state;
+        }
+        self.in_hub = false;
+
+        if let Some(parent) = self.state.open {
+            if distance >= main_ring_reach(self.style) {
+                let kids = menu[parent].children.len();
+                let angle = slice_angle(parent, menu.len());
+                self.state.hovered = Some(parent);
+                self.state.child = hit_child(dx, dy, angle, kids, child_step(self.style));
+                self.dwell = None;
+                return self.state;
+            }
+        }
+
+        let hit = hit_test(dx, dy, menu.len(), cancel);
+        self.state.hovered = hit;
+        self.state.child = None;
+        match hit {
+            Some(i) if Some(i) == self.state.open => self.dwell = None,
+            Some(i) => match self.dwell {
+                Some((j, since)) if j == i => {
+                    if now.duration_since(since) >= self.delay {
+                        // Opens this parent's children, or closes another parent's.
+                        self.state.open = (menu[i].kind == Kind::Parent).then_some(i);
+                        self.dwell = None;
+                    }
+                }
+                _ => {
+                    self.dwell = Some((i, now));
+                    if self.delay.is_zero() && menu[i].kind == Kind::Parent {
+                        self.state.open = Some(i);
+                    }
+                }
+            },
+            None => self.dwell = None,
+        }
+        self.state
+    }
+
+    /// Closes the open sub-ring (Esc or right-click). Returns false when none is open, in which
+    /// case the caller cancels the whole wheel.
+    pub fn back(&mut self) -> bool {
+        if self.state.open.take().is_some() {
+            self.state.child = None;
+            self.dwell = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The slice that releasing now would act on, if any.
+    pub fn picked<'a>(&self, menu: &'a [Slice]) -> Option<&'a Slice> {
+        let main = &menu[self.state.hovered?];
+        if let Some(child) = self.state.child {
+            return main.children.get(child);
+        }
+        match main.kind {
+            Kind::Parent => main.default_child.and_then(|d| main.children.get(d)),
+            _ => Some(main),
+        }
     }
 }
 
@@ -236,6 +411,152 @@ mod tests {
         assert_eq!(menu[0].children[0].kind, Kind::App);
         // The default points at the child by id, wherever the user moved it.
         assert_eq!(menu[0].default_child, Some(1));
+    }
+
+    mod navigation {
+        use std::time::{Duration, Instant};
+
+        use super::super::*;
+        use crate::theme::Style;
+
+        const DELAY: Duration = Duration::from_millis(200);
+
+        /// Merge (runs), Rotate (parent: right / left / 180, default right), Remove (app).
+        fn menu() -> Vec<Slice> {
+            let child = |id: &str| Slice::run(id, id, "rotate");
+            let mut rotate = Slice::run("rotate", "Rotate", "rotate");
+            rotate.kind = Kind::Parent;
+            rotate.children = vec![child("right"), child("left"), child("180")];
+            rotate.default_child = Some(0);
+            let mut remove = Slice::run("remove", "Remove", "remove-pages");
+            remove.kind = Kind::App;
+            vec![Slice::run("merge", "Merge", "merge"), rotate, remove]
+        }
+
+        /// Cursor offset pointing at slice `index` of `count`, `distance` px out.
+        fn toward(index: usize, count: usize, distance: f64) -> (f64, f64) {
+            let a = slice_angle(index, count);
+            (distance * a.cos(), distance * a.sin())
+        }
+
+        fn toward_child(child: usize, kids: usize, distance: f64) -> (f64, f64) {
+            let a = child_angle(slice_angle(1, 3), child, kids, child_step(Style::Orbit));
+            (distance * a.cos(), distance * a.sin())
+        }
+
+        #[test]
+        fn hovering_a_parent_opens_its_sub_ring_after_the_delay() {
+            let menu = menu();
+            let mut nav = Navigator::new(Style::Orbit, DELAY);
+            let t0 = Instant::now();
+            let (x, y) = toward(1, 3, 118.0);
+            assert_eq!(nav.track(&menu, x, y, t0).open, None);
+            assert_eq!(nav.track(&menu, x, y, t0 + DELAY / 2).open, None);
+            let state = nav.track(&menu, x, y, t0 + DELAY);
+            assert_eq!((state.hovered, state.open), (Some(1), Some(1)));
+
+            // Out to the second child.
+            let (x, y) = toward_child(1, 3, 215.0);
+            let state = nav.track(&menu, x, y, t0 + DELAY * 2);
+            assert_eq!(state.child, Some(1));
+            assert_eq!(nav.picked(&menu).unwrap().id, "left");
+        }
+
+        #[test]
+        fn passing_over_a_parent_quickly_does_not_open_it() {
+            let menu = menu();
+            let mut nav = Navigator::new(Style::Orbit, DELAY);
+            let t0 = Instant::now();
+            let (x, y) = toward(1, 3, 118.0);
+            nav.track(&menu, x, y, t0);
+            let (x, y) = toward(2, 3, 118.0);
+            let state = nav.track(&menu, x, y, t0 + DELAY / 2);
+            assert_eq!(
+                state,
+                WheelState {
+                    hovered: Some(2),
+                    open: None,
+                    child: None
+                }
+            );
+            assert_eq!(nav.picked(&menu).unwrap().kind, Kind::App);
+        }
+
+        #[test]
+        fn releasing_over_a_parent_runs_its_default_child() {
+            let menu = menu();
+            let mut nav = Navigator::new(Style::Orbit, DELAY);
+            let (x, y) = toward(1, 3, 118.0);
+            nav.track(&menu, x, y, Instant::now());
+            assert_eq!(nav.picked(&menu).unwrap().id, "right");
+
+            // A parent without a default does nothing.
+            let mut menu = menu.clone();
+            menu[1].default_child = None;
+            assert!(nav.picked(&menu).is_none());
+        }
+
+        #[test]
+        fn the_hub_back_and_other_slices_close_one_level() {
+            let menu = menu();
+            let mut nav = Navigator::new(Style::Orbit, DELAY);
+            let t0 = Instant::now();
+            let (x, y) = toward(1, 3, 118.0);
+            nav.track(&menu, x, y, t0);
+            nav.track(&menu, x, y, t0 + DELAY);
+            assert_eq!(nav.state().open, Some(1));
+
+            // Back to the hub: closed, and releasing there cancels.
+            let state = nav.track(&menu, 3.0, 4.0, t0 + DELAY * 2);
+            assert_eq!(state, WheelState::default());
+            assert!(nav.picked(&menu).is_none());
+
+            // Open again, then Esc / right-click closes it; a second back has nothing to close.
+            nav.track(&menu, x, y, t0 + DELAY * 3);
+            nav.track(&menu, x, y, t0 + DELAY * 4);
+            assert_eq!(nav.state().open, Some(1));
+            assert!(nav.back());
+            assert_eq!(nav.state().open, None);
+            assert!(!nav.back());
+
+            // Open again; resting on another main slice for the delay closes it.
+            nav.track(&menu, x, y, t0 + DELAY * 5);
+            nav.track(&menu, x, y, t0 + DELAY * 6);
+            let (mx, my) = toward(0, 3, 118.0);
+            nav.track(&menu, mx, my, t0 + DELAY * 7);
+            assert_eq!(nav.state().open, Some(1));
+            nav.track(&menu, mx, my, t0 + DELAY * 8);
+            assert_eq!(nav.state().open, None);
+            assert_eq!(nav.picked(&menu).unwrap().id, "merge");
+        }
+
+        #[test]
+        fn pointing_beside_the_fan_picks_no_child() {
+            let menu = menu();
+            let mut nav = Navigator::new(Style::Orbit, DELAY);
+            let t0 = Instant::now();
+            let (x, y) = toward(1, 3, 118.0);
+            nav.track(&menu, x, y, t0);
+            nav.track(&menu, x, y, t0 + DELAY);
+            // Far out but pointing at Merge's side of the wheel: no child.
+            let (x, y) = toward(0, 3, 230.0);
+            let state = nav.track(&menu, x, y, t0 + DELAY * 2);
+            assert_eq!((state.open, state.child), (Some(1), None));
+        }
+
+        #[test]
+        fn child_fan_is_symmetric_around_the_parent() {
+            let step = child_step(Style::Orbit);
+            assert!((child_angle(1.0, 1, 3, step) - 1.0).abs() < 1e-12);
+            assert!(
+                (child_angle(1.0, 0, 2, step) - 1.0 + (child_angle(1.0, 1, 2, step) - 1.0)).abs()
+                    < 1e-12
+            );
+            for i in 0..5 {
+                let a = child_angle(0.3, i, 5, step);
+                assert_eq!(hit_child(a.cos(), a.sin(), 0.3, 5, step), Some(i));
+            }
+        }
     }
 
     #[test]

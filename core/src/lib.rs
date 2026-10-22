@@ -39,3 +39,6 @@ pub mod settings;
 pub mod theme;
 
 pub mod icons;
+
+#[cfg(windows)]
+pub mod mouse;

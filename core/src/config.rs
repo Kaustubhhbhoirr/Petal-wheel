@@ -14,6 +14,8 @@ pub struct Config {
     pub shortcut: String,
     /// Id of the wheel theme, e.g. "orbit" (see `themes/`).
     pub theme: String,
+    /// How long to rest on a slice with children before its sub-ring opens, in milliseconds.
+    pub sub_ring_delay_ms: u64,
     pub slices: SliceConfig,
 }
 
@@ -32,12 +34,22 @@ impl Default for Config {
         Self {
             shortcut: Shortcut::default().to_string(),
             theme: crate::theme::DEFAULT_THEME.to_string(),
+            sub_ring_delay_ms: DEFAULT_SUB_RING_DELAY_MS,
             slices: SliceConfig::default(),
         }
     }
 }
 
+/// Default hover time before a sub-ring opens: long enough not to open while passing over a
+/// slice, short enough to feel instant.
+pub const DEFAULT_SUB_RING_DELAY_MS: u64 = 200;
+
 impl Config {
+    /// The sub-ring delay, kept between 0 and 1000 ms whatever the file says.
+    pub fn sub_ring_delay_ms(&self) -> u64 {
+        self.sub_ring_delay_ms.min(1000)
+    }
+
     /// The configured shortcut, or the default if the file holds something invalid.
     pub fn shortcut(&self) -> Shortcut {
         self.shortcut.parse().unwrap_or_default()
@@ -106,6 +118,7 @@ mod tests {
         let config = Config {
             shortcut: "Ctrl+Shift+F12".into(),
             theme: "slim-ring".into(),
+            sub_ring_delay_ms: 250,
             slices: SliceConfig {
                 order: vec!["pdf-light.merge".into()],
                 disabled: vec!["pdf-light.split".into()],

@@ -117,7 +117,7 @@ fn split_saves_one_numbered_file_per_page() {
     let input = pdf(&dir, "Report.pdf", 12);
     std::fs::write(dir.path().join("Report - page 05.pdf"), b"keep me").unwrap();
 
-    let outcome = run(&catalog, "pdf-light.split", &[input]).unwrap();
+    let outcome = run(&catalog, "pdf-light.split.pages", &[input]).unwrap();
 
     assert_eq!(outcome.outputs.len(), 12);
     assert_eq!(outcome.outputs[0], dir.path().join("Report - page 01.pdf"));
@@ -142,7 +142,7 @@ fn split_of_a_bad_pdf_leaves_nothing_behind() {
     let junk = dir.path().join("junk.pdf");
     std::fs::write(&junk, b"%PDF-1.7 not really").unwrap();
 
-    let err = run(&catalog, "pdf-light.split", &[junk]).unwrap_err();
+    let err = run(&catalog, "pdf-light.split.pages", &[junk]).unwrap_err();
     assert!(err.to_string().contains("junk.pdf"), "{err}");
     assert_eq!(listing(&dir), ["junk.pdf"]);
 }
@@ -156,7 +156,7 @@ fn rotate_runs_once_per_pdf_and_skips_bad_ones() {
     let empty = dir.path().join("c.pdf");
     std::fs::write(&empty, b"").unwrap();
 
-    let outcome = run(&catalog, "pdf-light.rotate", &[b, empty, a]).unwrap();
+    let outcome = run(&catalog, "pdf-light.rotate.right", &[b, empty, a]).unwrap();
 
     assert_eq!(
         outcome.outputs,

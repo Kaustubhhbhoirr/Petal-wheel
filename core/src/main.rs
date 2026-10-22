@@ -16,7 +16,7 @@ use flick_core::packs::{self, Catalog, PackError};
 use flick_core::settings::{self, open_settings, AppState};
 use flick_core::theme::{self, Theme};
 use flick_core::toast::{Toast, ToastWindow, Toaster};
-use flick_core::wheel::Slice;
+use flick_core::wheel::{Slice, WheelState};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent};
@@ -375,7 +375,10 @@ fn bench(
         times.push(started.elapsed().as_secs_f64() * 1000.0);
         for i in [Some(0), Some(1), None] {
             std::thread::sleep(Duration::from_millis(60));
-            overlay.highlight(i);
+            overlay.update(WheelState {
+                hovered: i,
+                ..WheelState::default()
+            });
         }
         std::thread::sleep(Duration::from_millis(60));
         overlay.hide();
