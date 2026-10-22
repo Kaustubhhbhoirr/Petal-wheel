@@ -10,7 +10,7 @@ use crate::hotkey::Shortcut;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// The shortcut that opens the wheel, e.g. "Ctrl+Shift+Q".
+    /// The shortcut that opens the wheel, e.g. "Ctrl+Alt+Space".
     pub shortcut: String,
     pub slices: SliceConfig,
 }
@@ -92,7 +92,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (config, warning) = load(&dir.path().join("config.toml"));
         assert_eq!(config, Config::default());
-        assert_eq!(config.shortcut, "Ctrl+Shift+Q");
+        assert_eq!(config.shortcut, "Ctrl+Alt+Space");
         assert!(warning.is_none());
     }
 
@@ -118,7 +118,7 @@ mod tests {
         std::fs::write(&path, "[slices]\ndisabled = [\"a.b\"]\n").unwrap();
         let (config, warning) = load(&path);
         assert!(warning.is_none());
-        assert_eq!(config.shortcut, "Ctrl+Shift+Q");
+        assert_eq!(config.shortcut, "Ctrl+Alt+Space");
         assert_eq!(config.slices.disabled, ["a.b"]);
     }
 

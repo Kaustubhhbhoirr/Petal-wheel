@@ -9,7 +9,7 @@ Select a file, press a shortcut, flick to an action. No uploads, no ads, no subs
 ## How it works
 
 1. Select one or more files in Explorer or on the Desktop.
-2. Hold **Ctrl + Shift + Q** (you can change it in Settings). A wheel opens at the cursor with actions that fit the files.
+2. Hold **Ctrl + Alt + Space** (you can change it in Settings). A wheel opens at the cursor with actions that fit the files.
 3. Move toward a slice and release. The result is saved next to the original.
 4. A small card in the corner shows progress (with Cancel), then **Open** and **Show in folder**.
 

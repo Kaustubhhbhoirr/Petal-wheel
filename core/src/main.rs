@@ -42,7 +42,7 @@ impl Renderer {
 
 /// Command line, mostly for testing and measurements:
 ///
-///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Shift+Q"] [--open-once]
+///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Alt+Space"] [--open-once]
 ///   flick --bench <renderer> [--runs N] [--out results.json]
 ///
 /// `--shortcut` applies to this run only; Settings changes the saved one.

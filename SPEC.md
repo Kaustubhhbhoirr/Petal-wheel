@@ -9,7 +9,7 @@ Status: planning. This document is the single source of truth until v0.1 ships. 
 
 ## 0. Builder brief (read this first, then say "start building")
 
-**What we are building:** Flick, a free, open-source, offline Windows tray app. The user selects files in Explorer, holds the shortcut (default Ctrl + Shift + Q), and a radial wheel opens at the cursor with actions that fit the file type (PDF merge, split, compress, to Word, images to PDF, and so on). Releasing over a slice runs it. Output is saved next to the original and never overwrites it. With nothing selected, the wheel becomes a launcher (pinned apps, system tools, recent files).
+**What we are building:** Flick, a free, open-source, offline Windows tray app. The user selects files in Explorer, holds the shortcut (default Ctrl + Alt + Space), and a radial wheel opens at the cursor with actions that fit the file type (PDF merge, split, compress, to Word, images to PDF, and so on). Releasing over a slice runs it. Output is saved next to the original and never overwrites it. With nothing selected, the wheel becomes a launcher (pinned apps, system tools, recent files).
 
 **Owner:** Kaustubh Bhoir, Computer Engineering student, India. This is a portfolio and resume project, so code quality, a clean README and GitHub-readiness matter. He develops on a fast machine but the app must run well on low-end i3/i5 PCs with 4 GB RAM.
 
@@ -78,7 +78,7 @@ Flick's difference is the workflow: **select the file, press a key, pick the act
 | Workers | Python (shared embedded runtime) + native Rust for light PDF ops | Mature conversion libraries live in Python. |
 | Platform v1 | **Windows 10 (1809+) and Windows 11, x64** [confirmed] | WebView2 runtime required on Win10 (installer bootstraps it). |
 | Wheel trigger | **Hold the shortcut to open, move toward a slice, release to run** [your call, default kept] | Optional "click mode": press once to open, click a slice. |
-| Default shortcut | **Ctrl + Shift + Q** [changed in v0.5; was Ctrl + Alt + Space, which was already taken on the dev PC] | Configurable in Settings. Conflicts are detected and reported. |
+| Default shortcut | **Ctrl + Alt + Space** [confirmed, must be customisable] | Configurable in Settings. Conflicts are detected and shown in a toast that opens Settings. |
 | Distribution | Installer + portable `.exe`, GitHub Releases, then winget / Scoop / Chocolatey | |
 
 ---
@@ -393,7 +393,7 @@ flick-wheel/
 
 1. **Windows 10 support:** DECIDED, both 10 and 11. Assumed yes (1809+). Drop it if it complicates WebView2 or the installer.
 2. **Hold versus click:** DECIDED, left to Claude: hold-to-open default, click mode optional; confirm after trying both in the spike.
-3. **Default shortcut:** DECIDED, Ctrl + Shift + Q (changed from Ctrl + Alt + Space in v0.5 after a real conflict), user-customisable. Note: Firefox uses Ctrl + Shift + Q to quit; Flick takes the combo first while it runs.
+3. **Default shortcut:** DECIDED, Ctrl + Alt + Space, user-customisable. Other apps may own it (the Claude desktop app or PowerToys did on the dev PC); Flick then shows a toast with a Change shortcut button.
 4. **Wheel renderer:** WebView2 or native drawing (decided by v0.1 measurements).
 5. **Code signing:** which free option, if any, is available for the project.
 6. **Rust learning curve:** DECIDED, left to Claude: scaffold the core, explain as we go. Original question: how much of the core you want to write yourself versus scaffold.

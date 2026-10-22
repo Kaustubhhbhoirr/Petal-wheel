@@ -22,7 +22,7 @@ pub struct Shortcut {
 
 impl Default for Shortcut {
     fn default() -> Self {
-        "Ctrl+Shift+Q".parse().expect("valid default shortcut")
+        "Ctrl+Alt+Space".parse().expect("valid default shortcut")
     }
 }
 
@@ -404,9 +404,9 @@ mod tests {
     #[test]
     fn parses_and_prints_the_default() {
         let s = Shortcut::default();
-        assert!(s.ctrl && !s.alt && s.shift && !s.win);
-        assert_eq!(s.vk, 0x51);
-        assert_eq!(s.to_string(), "Ctrl+Shift+Q");
+        assert!(s.ctrl && s.alt && !s.shift && !s.win);
+        assert_eq!(s.vk, 0x20);
+        assert_eq!(s.to_string(), "Ctrl+Alt+Space");
     }
 
     #[test]
