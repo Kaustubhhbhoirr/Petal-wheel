@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the wheel overlay window.",
-  "windows": ["wheel"],
+  "description": "Permissions for the wheel overlay and Settings windows.",
+  "windows": ["wheel", "settings"],
   "permissions": ["core:default"]
 }

@@ -46,3 +46,24 @@ selection is read with `IFolderView::Items(SVGIO_SELECTION)`; items without a fi
 counted as skipped. COM runs on a short-lived STA thread per read.
 
 Probe: `cargo run -p flick-core --example selection_probe [-- --foreground 3]`.
+
+## v0.5: packs, toast and Settings
+
+- **Packs** (`core/src/packs.rs`, format in [packs.md](packs.md)). Every folder under `packs/` with
+  a `pack.toml` is loaded and validated at startup (about 1 ms). Problems are reported per pack, never
+  fatal. The wheel's slices come from the loaded packs, filtered by the selection and ordered by the
+  user's config. A job runs the slice's worker with that pack's limits (`jobs::run_slice`).
+- **Config** (`core/src/config.rs`): `%APPDATA%\Flick\config.toml` holds the shortcut, slice order and
+  disabled slices. A missing or broken file falls back to defaults; saves go through a temp file.
+- **Toast** (`core/src/toast.rs`): a native layered card, drawn with the same Direct2D code as the
+  wheel (`core/src/gfx.rs`), because Windows notifications can be turned off system-wide. States:
+  running (Cancel), done (Open, Show in folder), failed, and notice (one action button). It never
+  takes focus; auto-hide pauses while hovered.
+- **Settings** (`core/src/settings.rs`, `ui/settings.*`): a WebView2 window created on open and
+  destroyed on close. The shortcut recorder checks for conflicts as you press keys; `HotkeyManager`
+  registers the new combo before releasing the old one, and pauses the hotkey while the recorder has
+  focus.
+
+Gotcha found while testing: `ShowWindow`/`SetTimer` send messages back into a window procedure
+synchronously, so procedures use `try_borrow_mut` on their thread-local state and leave re-entrant
+messages to `DefWindowProcW`.

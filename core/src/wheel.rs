@@ -1,6 +1,4 @@
-//! Wheel model shared by every renderer: which slices to show and which one the cursor points at.
-
-use std::path::Path;
+//! Wheel geometry shared by every renderer: where slices are and which one the cursor points at.
 
 /// Logical (96 DPI) sizes. Renderers multiply by the monitor scale factor.
 pub const OUTER_RADIUS: f64 = 140.0;
@@ -15,66 +13,21 @@ pub fn window_size() -> f64 {
     2.0 * (OUTER_RADIUS + PADDING)
 }
 
+/// What a renderer needs to draw one slice. Which slices exist comes from packs
+/// ([`crate::packs::Catalog::slices_for`]).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Slice {
-    pub id: &'static str,
-    pub label: &'static str,
-    /// Disabled slices are drawn dimmed and do nothing when chosen (not built yet).
-    pub enabled: bool,
+    pub id: String,
+    pub label: String,
 }
 
-const fn slice(id: &'static str, label: &'static str, enabled: bool) -> Slice {
-    Slice { id, label, enabled }
-}
-
-/// The slices for a selection (SPEC 4.3). Only Merge is wired up in the v0.1 spike.
-pub fn slices_for(paths: &[impl AsRef<Path>]) -> Vec<Slice> {
-    let pdfs = paths
-        .iter()
-        .filter(|p| has_ext(p.as_ref(), &["pdf"]))
-        .count();
-    let images = paths
-        .iter()
-        .filter(|p| has_ext(p.as_ref(), &["png", "jpg", "jpeg", "webp"]))
-        .count();
-    let all = paths.len();
-
-    let mut slices = match (all, pdfs, images) {
-        (0, _, _) => return Vec::new(),
-        (1, 1, _) => vec![
-            slice("pdf.to_word", "To Word", false),
-            slice("pdf.to_images", "To images", false),
-            slice("pdf.split", "Split", false),
-            slice("pdf.compress", "Compress", false),
-            slice("pdf.remove_pages", "Remove pages", false),
-            slice("pdf.organize", "Organize", false),
-        ],
-        (n, p, _) if n == p => vec![
-            slice("pdf.merge", "Merge", true),
-            slice("pdf.compress_all", "Compress all", false),
-            slice("pdf.to_images", "To images", false),
-        ],
-        (1, _, 1) => vec![
-            slice("image.convert", "Convert", false),
-            slice("image.to_pdf", "To PDF", false),
-            slice("image.shrink", "Shrink", false),
-        ],
-        (n, _, i) if n == i => vec![
-            slice("image.combine_pdf", "Combine PDF", false),
-            slice("image.convert_all", "Convert all", false),
-            slice("image.shrink_all", "Shrink all", false),
-        ],
-        _ => Vec::new(),
-    };
-    slices.push(slice("any.copy_path", "Copy path", false));
-    slices.push(slice("any.zip", "Zip", false));
-    slices
-}
-
-fn has_ext(path: &Path, exts: &[&str]) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| exts.iter().any(|x| e.eq_ignore_ascii_case(x)))
+impl From<&crate::packs::PackSlice> for Slice {
+    fn from(slice: &crate::packs::PackSlice) -> Self {
+        Self {
+            id: slice.id.clone(),
+            label: slice.label.clone(),
+        }
+    }
 }
 
 /// Centre angle of slice `index` of `count`, in radians. Slice 0 is at the top; the rest
@@ -140,24 +93,5 @@ mod tests {
                 assert_eq!(hit, Some(index), "count {count} index {index}");
             }
         }
-    }
-
-    #[test]
-    fn slices_depend_on_selection() {
-        let ids =
-            |paths: &[&str]| -> Vec<&str> { slices_for(paths).iter().map(|s| s.id).collect() };
-        assert!(ids(&[]).is_empty());
-        assert_eq!(ids(&["a.PDF", "b.pdf"])[0], "pdf.merge");
-        assert_eq!(ids(&["a.pdf"])[0], "pdf.to_word");
-        assert_eq!(ids(&["a.png"])[0], "image.convert");
-        assert_eq!(ids(&["a.png", "b.jpg"])[0], "image.combine_pdf");
-        assert_eq!(ids(&["a.pdf", "b.png"]), ["any.copy_path", "any.zip"]);
-        // Only merge is enabled during the spike.
-        let enabled: Vec<_> = slices_for(&["a.pdf", "b.pdf"])
-            .into_iter()
-            .filter(|s| s.enabled)
-            .map(|s| s.id)
-            .collect();
-        assert_eq!(enabled, ["pdf.merge"]);
     }
 }

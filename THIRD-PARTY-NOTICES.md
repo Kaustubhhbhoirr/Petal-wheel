@@ -10,6 +10,8 @@ before each release (see SPEC.md section 11).
 | [lopdf](https://github.com/J-F-Liu/lopdf) | pdf-light worker | MIT | Junfeng Liu and contributors |
 | [windows-rs](https://github.com/microsoft/windows-rs) | core | MIT OR Apache-2.0 | Microsoft Corporation |
 | [anyhow](https://github.com/dtolnay/anyhow), [thiserror](https://github.com/dtolnay/thiserror) | core, workers | MIT OR Apache-2.0 | David Tolnay |
+| [toml](https://github.com/toml-rs/toml) | core (config, pack manifests) | MIT OR Apache-2.0 | The toml-rs developers |
+| [semver](https://github.com/dtolnay/semver) | core (pack version checks) | MIT OR Apache-2.0 | David Tolnay |
 
 Transitive Rust dependencies can be listed with `cargo tree` and audited with
 [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny) (`cargo deny check licenses`).

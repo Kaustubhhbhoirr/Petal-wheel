@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Flick Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Flick Settings</h1>
+      <span id="version" class="muted"></span>
+    </header>
+
+    <section>
+      <h2>Shortcut</h2>
+      <p class="muted">Hold it to open the wheel, move toward an action, release to run it.</p>
+      <div class="row">
+        <button id="recorder" class="recorder" type="button" aria-describedby="shortcut-status"></button>
+        <button id="reset-shortcut" class="link" type="button">Use default</button>
+      </div>
+      <p id="shortcut-status" class="status" role="status"></p>
+    </section>
+
+    <section>
+      <h2>Wheel actions</h2>
+      <p class="muted">Order and on/off. Only actions that fit the selected files appear on the wheel.</p>
+      <ul id="slices" class="list"></ul>
+      <p id="no-slices" class="muted" hidden>No actions yet: install a pack.</p>
+    </section>
+
+    <section>
+      <h2>Packs</h2>
+      <ul id="packs" class="list"></ul>
+      <ul id="pack-errors" class="errors"></ul>
+      <p class="muted small">Packs folder: <span id="packs-dir" class="path"></span></p>
+    </section>
+
+    <footer>
+      <p class="muted small">Settings file: <span id="config-path" class="path"></span></p>
+      <div class="row end">
+        <span id="save-status" class="status" role="status"></span>
+        <button id="close" type="button">Close</button>
+        <button id="save" type="button" class="primary" disabled>Save</button>
+      </div>
+    </footer>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

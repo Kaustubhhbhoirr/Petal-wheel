@@ -52,14 +52,14 @@ function render() {
     svg.append(el("path", { d, class: "backdrop" }));
     svg.append(el("path", { d, class: hover ? "slice hover" : "slice" }));
     const [x, y] = at(mid, a);
-    const cls = hover ? "label hover" : slice.enabled ? "label" : "label disabled";
+    const cls = hover ? "label hover" : "label";
     svg.append(el("text", { x, y, class: cls }, slice.label));
   });
 
   svg.append(el("circle", { cx: C, cy: C, r: INNER - 6, class: "backdrop" }));
   const active = highlighted === null ? null : slices[highlighted];
   let lines = [caption];
-  if (active) lines = active.enabled ? [active.label] : [active.label, "(coming soon)"];
+  if (active) lines = [active.label];
   lines.forEach((line, i) => {
     const y = C + (i - (lines.length - 1) / 2) * 17;
     svg.append(el("text", { x: C, y, class: "caption" }, line));

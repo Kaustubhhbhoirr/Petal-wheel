@@ -22,3 +22,16 @@ pub mod log;
 
 #[cfg(windows)]
 pub mod controller;
+
+pub mod config;
+
+pub mod packs;
+
+#[cfg(windows)]
+pub mod gfx;
+
+#[cfg(windows)]
+pub mod toast;
+
+#[cfg(windows)]
+pub mod settings;

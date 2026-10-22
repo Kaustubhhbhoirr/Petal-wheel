@@ -1,21 +1,24 @@
 // Hide the console window in release builds; Flick lives in the tray.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use flick_core::controller::{scale_at, Controller, Notice};
-use flick_core::hotkey::{HotkeyListener, Shortcut};
+use flick_core::config;
+use flick_core::controller::{scale_at, Controller, Shared};
+use flick_core::hotkey::{HotkeyError, HotkeyManager, Shortcut};
 use flick_core::log::log;
 use flick_core::overlay::native::NativeOverlay;
 use flick_core::overlay::webview::{PaintSignal, WebviewOverlay};
 use flick_core::overlay::{Overlay, Placement, WheelContent};
-use flick_core::wheel::slices_for;
+use flick_core::packs::{self, Catalog, PackError};
+use flick_core::settings::{self, open_settings, AppState};
+use flick_core::toast::{Toast, ToastWindow, Toaster};
+use flick_core::wheel::Slice;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent};
-use tauri_plugin_notification::NotificationExt;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
@@ -37,13 +40,15 @@ impl Renderer {
     }
 }
 
-/// Command line, mostly for the spike's measurements:
+/// Command line, mostly for testing and measurements:
 ///
-///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Alt+Space"] [--open-once]
+///   flick [--renderer native|webview|webview-warm] [--shortcut "Ctrl+Shift+Q"] [--open-once]
 ///   flick --bench <renderer> [--runs N] [--out results.json]
+///
+/// `--shortcut` applies to this run only; Settings changes the saved one.
 struct Args {
     renderer: Renderer,
-    shortcut: Shortcut,
+    shortcut: Option<Shortcut>,
     bench: bool,
     runs: usize,
     out: Option<PathBuf>,
@@ -54,7 +59,7 @@ impl Args {
     fn parse() -> Self {
         let mut args = Args {
             renderer: Renderer::Native,
-            shortcut: Shortcut::default(),
+            shortcut: None,
             bench: false,
             runs: 20,
             out: None,
@@ -74,7 +79,7 @@ impl Args {
                 "--shortcut" => {
                     let text = it.next().unwrap_or_default();
                     match text.parse() {
-                        Ok(shortcut) => args.shortcut = shortcut,
+                        Ok(shortcut) => args.shortcut = Some(shortcut),
                         Err(e) => log(&format!("ignoring shortcut {text:?}: {e}")),
                     }
                 }
@@ -88,16 +93,17 @@ impl Args {
     }
 }
 
-/// Keeps the hotkey registered for the life of the app.
-struct HotkeyState(#[allow(dead_code)] Mutex<Option<HotkeyListener>>);
-
 fn main() {
     let args = Args::parse();
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
         .manage(PaintSignal::default())
         .invoke_handler(tauri::generate_handler![
-            flick_core::overlay::webview::wheel_painted
+            flick_core::overlay::webview::wheel_painted,
+            settings::get_settings,
+            settings::check_shortcut,
+            settings::save_settings,
+            settings::pause_hotkey,
+            settings::close_settings,
         ])
         .setup(move |app| {
             build_tray(app.handle())?;
@@ -115,7 +121,7 @@ fn main() {
                 let overlay = overlay.clone();
                 std::thread::spawn(move || open_once(&*overlay));
             }
-            start_hotkey(app.handle(), overlay, args.shortcut);
+            start(app.handle(), overlay, args.shortcut)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -125,7 +131,7 @@ fn main() {
         });
 
     app.run(|_, event| {
-        // The wheel window is destroyed after each use; that must not quit the tray app.
+        // Flick's windows come and go (wheel, Settings); none of them closing quits the tray app.
         if let RunEvent::ExitRequested {
             code: None, api, ..
         } = event
@@ -135,17 +141,119 @@ fn main() {
     });
 }
 
+/// Loads config and packs, then starts the toast, the controller and the shortcut.
+fn start(
+    app: &AppHandle,
+    overlay: Arc<dyn Overlay>,
+    shortcut_override: Option<Shortcut>,
+) -> Result<(), String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default();
+
+    let config_path = config::config_path();
+    let config = match &config_path {
+        Some(path) => {
+            let (config, warning) = config::load(path);
+            if let Some(warning) = warning {
+                log(&warning);
+            }
+            config
+        }
+        None => config::Config::default(),
+    };
+
+    let packs_dir = packs::default_dir(&exe_dir);
+    let catalog = load_packs(packs_dir.as_deref(), &exe_dir);
+
+    let toaster: Arc<dyn Toaster> = Arc::new(ToastWindow::start()?);
+    let shared = Arc::new(Shared {
+        catalog: RwLock::new(catalog),
+        config: RwLock::new(config.clone()),
+    });
+
+    let (tx, rx) = mpsc::channel();
+    Controller::start(overlay, rx, shared.clone(), toaster.clone());
+
+    let hotkeys = Arc::new(HotkeyManager::new(tx));
+    let shortcut = shortcut_override.unwrap_or_else(|| config.shortcut());
+    match hotkeys.set(shortcut) {
+        Ok(()) => log(&format!("listening for {shortcut}")),
+        Err(e) => {
+            log(&e.to_string());
+            hotkeys.remember(shortcut);
+            let settings_app = app.clone();
+            toaster.show(Toast::Notice {
+                title: "Shortcut unavailable".into(),
+                message: match e {
+                    HotkeyError::Conflict(s) => format!("{s} is used by another app."),
+                    other => other.to_string(),
+                },
+                button: "Change shortcut".into(),
+                on_click: Arc::new(move || open_settings(&settings_app)),
+            });
+        }
+    }
+
+    {
+        let catalog = shared.catalog.read().unwrap();
+        if catalog.packs.is_empty() {
+            let settings_app = app.clone();
+            toaster.show(Toast::Notice {
+                title: "No packs loaded".into(),
+                message: "The wheel has no actions until a pack is installed.".into(),
+                button: "Open Settings".into(),
+                on_click: Arc::new(move || open_settings(&settings_app)),
+            });
+        }
+    }
+
+    app.manage(AppState {
+        shared,
+        hotkeys,
+        config_path,
+        packs_dir,
+    });
+    Ok(())
+}
+
+fn load_packs(dir: Option<&Path>, exe_dir: &Path) -> Catalog {
+    let started = Instant::now();
+    let catalog = match dir {
+        Some(dir) => packs::load_dir(dir, Some(exe_dir)),
+        None => Catalog {
+            packs: Vec::new(),
+            errors: vec![PackError {
+                dir: exe_dir.join("packs"),
+                message: "No packs folder was found next to Flick.".into(),
+            }],
+        },
+    };
+    for error in &catalog.errors {
+        log(&format!("pack {}: {}", error.dir.display(), error.message));
+    }
+    log(&format!(
+        "loaded {} pack(s) from {} in {:.1} ms",
+        catalog.packs.len(),
+        dir.map(|d| d.display().to_string()).unwrap_or_default(),
+        started.elapsed().as_secs_f64() * 1000.0
+    ));
+    catalog
+}
+
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let settings = MenuItem::with_id(app, "settings", "Settings\u{2026}", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Flick", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = Menu::with_items(app, &[&settings, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("bundled icon"))
         .tooltip("Flick")
         .menu(&menu)
-        .on_menu_event(|app, event| {
-            if event.id.as_ref() == "quit" {
-                app.exit(0);
-            }
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "settings" => open_settings(app),
+            "quit" => app.exit(0),
+            _ => {}
         })
         .build(app)?;
     Ok(())
@@ -168,49 +276,6 @@ fn make_overlay(app: &AppHandle, renderer: Renderer) -> Result<Arc<dyn Overlay>,
     Ok(overlay)
 }
 
-fn start_hotkey(app: &AppHandle, overlay: Arc<dyn Overlay>, shortcut: Shortcut) {
-    let (tx, rx) = mpsc::channel();
-    let worker_dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(PathBuf::from))
-        .unwrap_or_default();
-    let notifier = app.clone();
-    Controller::start(overlay, rx, worker_dir, move |notice| {
-        toast(&notifier, notice)
-    });
-
-    match HotkeyListener::start(shortcut, move |event| {
-        let _ = tx.send(event);
-    }) {
-        Ok(listener) => {
-            log(&format!("listening for {shortcut}"));
-            app.manage(HotkeyState(Mutex::new(Some(listener))));
-        }
-        Err(e) => {
-            log(&e.to_string());
-            toast(
-                app,
-                Notice {
-                    title: "Flick shortcut unavailable".into(),
-                    body: e.to_string(),
-                },
-            );
-        }
-    }
-}
-
-fn toast(app: &AppHandle, notice: Notice) {
-    if let Err(e) = app
-        .notification()
-        .builder()
-        .title(&notice.title)
-        .body(&notice.body)
-        .show()
-    {
-        log(&format!("toast failed: {e}"));
-    }
-}
-
 fn screen_centre() -> Placement {
     let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
     let (x, y) = (w / 2, h / 2);
@@ -221,9 +286,24 @@ fn screen_centre() -> Placement {
     }
 }
 
+/// Six slices with realistic labels, for measurements independent of installed packs.
 fn sample_content() -> WheelContent {
+    let labels = [
+        "Merge",
+        "Compress all",
+        "To images",
+        "Copy path",
+        "Zip",
+        "Split",
+    ];
     WheelContent {
-        slices: slices_for(&["a.pdf", "b.pdf"]),
+        slices: labels
+            .iter()
+            .map(|label| Slice {
+                id: format!("bench.{}", label.to_lowercase()),
+                label: label.to_string(),
+            })
+            .collect(),
         caption: "2 PDFs".into(),
     }
 }

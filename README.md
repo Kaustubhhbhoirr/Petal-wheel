@@ -2,15 +2,19 @@
 
 Select a file, press a shortcut, flick to an action. No uploads, no ads, no subscriptions, no internet.
 
-> **Status:** v0.1 spike. Hold-to-open, Explorer selection, the native wheel and a sandboxed PDF
-> merge work end to end on Windows 11; the measurements are in
+> **Status:** v0.5 alpha in progress. Packs, a Settings window and Flick's own progress toast work
+> on Windows 11, with one action so far (merge PDFs). Spike measurements are in
 > [docs/spike-results.md](docs/spike-results.md). Not ready for daily use yet.
 
 ## How it works
 
 1. Select one or more files in Explorer or on the Desktop.
-2. Hold **Ctrl + Alt + Space**. A wheel opens at the cursor with actions that fit the files.
+2. Hold **Ctrl + Shift + Q** (you can change it in Settings). A wheel opens at the cursor with actions that fit the files.
 3. Move toward a slice and release. The result is saved next to the original.
+4. A small card in the corner shows progress (with Cancel), then **Open** and **Show in folder**.
+
+Settings (tray icon → Settings…) lets you record a new shortcut, reorder or turn off actions, and see
+installed packs. They are saved in a plain file, `%APPDATA%\Flick\config.toml`.
 
 Originals are never modified. If `report.pdf` already has a `report.docx` next to it, the output becomes
 `report (1).docx`.
@@ -35,10 +39,11 @@ A frozen or crashing conversion only kills its own worker. The core stays respon
 
 | Path | What it is |
 |---|---|
-| `core/` | Tauri 2 tray app: hotkey, selection reader, wheel, supervisor |
+| `core/` | Tauri 2 tray app: hotkey, selection reader, wheel, toast, pack loader, supervisor |
+| `packs/` | Pack manifests (`pack.toml`); each pack adds wheel actions and names its worker |
 | `workers/pdf-light/` | Native Rust PDF worker (merge; split and friends later) |
-| `ui/` | WebView2 wheel used for the renderer comparison (the shipping wheel is native) |
-| `docs/` | Architecture notes and spike results |
+| `ui/` | Settings window, plus the WebView2 wheel kept from the renderer comparison |
+| `docs/` | Architecture, [how to make a pack](docs/packs.md), spike results |
 | `scripts/` | Measurement and end-to-end test scripts (PowerShell) |
 | `SPEC.md` | Full spec and roadmap |
 
@@ -53,8 +58,9 @@ cargo test --workspace
 cargo run -p flick-core
 ```
 
-If another app already owns Ctrl + Alt + Space, Flick logs a conflict to
-`%LOCALAPPDATA%\Flick\flick.log`. Pick a different shortcut until the Settings window exists:
+If another app already owns the shortcut, Flick shows a toast with a **Change shortcut** button that
+opens Settings. Problems are also logged to `%LOCALAPPDATA%\Flick\flick.log`. For a one-off run with a
+different shortcut (not saved):
 
 ```bash
 cargo run -p flick-core -- --shortcut "Ctrl+Alt+Shift+F12"

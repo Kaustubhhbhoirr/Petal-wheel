@@ -1,0 +1,27 @@
+# The PDF Light pack: fast page operations done natively, no Python needed.
+id = "pdf-light"
+name = "PDF Light"
+version = "0.5.0"
+requires_core = ">=0.5"
+requires_packs = []
+license = "AGPL-3.0"
+
+[worker]
+kind = "native"
+# Installed builds keep the worker here. During development it is found next to flick.exe.
+entry = "bin/pdf-light.exe"
+
+[limits]
+memory_mb = 512
+time_seconds = 120
+cpu_percent = 50
+
+[[slices]]
+id = "merge"
+label = "Merge"
+icon = "icons/merge.svg"
+applies_to = ["pdf"]
+min_files = 2
+# {stem} is the name of the first file (after sorting by name), without its extension.
+output = "{stem} - merged.pdf"
+action = { worker = "pdf-light", op = "merge" }

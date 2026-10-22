@@ -73,11 +73,12 @@ pub fn free_name(desired: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
         .expect("some name is free")
 }
 
-/// The name a merge result should get: named after the first input, next to it.
-pub fn merged_name(sorted_inputs: &[PathBuf]) -> Option<PathBuf> {
-    let first = sorted_inputs.first()?;
-    let stem = first.file_stem()?.to_string_lossy();
-    Some(first.with_file_name(format!("{stem} - merged.pdf")))
+/// Where a slice's result should go: next to the first input (after sorting), named by the
+/// slice's output template. The `(n)` collision rule is applied later, at commit time.
+pub fn output_path(template: &str, sorted_inputs: &[PathBuf]) -> Result<PathBuf, String> {
+    let first = sorted_inputs.first().ok_or("Nothing is selected.")?;
+    let name = crate::packs::output_name(template, first)?;
+    Ok(first.with_file_name(name))
 }
 
 /// A unique, clearly-temporary sibling of `final_path`, on the same volume so the final move is
@@ -139,16 +140,18 @@ fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-pub use run::{merge_pdfs, JobError};
+pub use run::{run_slice, JobError};
 
 #[cfg(windows)]
 mod run {
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
     use serde::Deserialize;
     use serde_json::json;
 
-    use super::{commit, merged_name, sort_by_name, temp_path_for};
+    use super::{commit, output_path, sort_by_name, temp_path_for};
+    use crate::packs::{Pack, PackSlice};
     use crate::supervisor::{self, CancelToken, Limits, SupervisorError, Worker};
 
     #[derive(Debug, thiserror::Error)]
@@ -161,7 +164,7 @@ mod run {
         #[error("Could not save the result ({0}).")]
         Save(std::io::Error),
         #[error("{0}")]
-        BadInput(&'static str),
+        BadInput(String),
     }
 
     #[derive(Deserialize)]
@@ -176,19 +179,25 @@ mod run {
         message: String,
     }
 
-    /// Merges PDFs (sorted by name) into `<first> - merged.pdf` next to the first one.
-    pub fn merge_pdfs(
-        worker_exe: &Path,
+    /// Runs `slice` on `inputs` (sorted by name) with `pack`'s worker and limits, and returns the
+    /// path of the new file next to the first input.
+    pub fn run_slice(
+        pack: &Pack,
+        slice: &PackSlice,
         inputs: &[PathBuf],
-        limits: &Limits,
         cancel: &CancelToken,
     ) -> Result<PathBuf, JobError> {
         let mut inputs = inputs.to_vec();
         sort_by_name(&mut inputs);
-        let desired = merged_name(&inputs).ok_or(JobError::BadInput("Nothing to merge."))?;
+        let desired = output_path(&slice.output, &inputs).map_err(JobError::BadInput)?;
         let temp = temp_path_for(&desired);
+        let limits = Limits {
+            memory_mb: pack.limits.memory_mb,
+            cpu_percent: pack.limits.cpu_percent,
+            time: Duration::from_secs(pack.limits.time_seconds),
+        };
 
-        let result = run_worker(worker_exe, &inputs, &temp, limits, cancel)
+        let result = run_worker(&pack.worker_exe, &slice.op, &inputs, &temp, &limits, cancel)
             .and_then(|()| commit(&temp, &desired).map_err(JobError::Save));
         if result.is_err() {
             // The original inputs are never touched; only our own temp file is cleaned up.
@@ -199,6 +208,7 @@ mod run {
 
     fn run_worker(
         worker_exe: &Path,
+        op: &str,
         inputs: &[PathBuf],
         temp: &Path,
         limits: &Limits,
@@ -208,7 +218,7 @@ mod run {
             exe: worker_exe.to_path_buf(),
             args: Vec::new(),
         };
-        let request = json!({ "op": "merge", "inputs": inputs, "output": temp });
+        let request = json!({ "op": op, "inputs": inputs, "output": temp });
         let response: Response = supervisor::run(&worker, &request, limits, cancel)?;
         if response.ok {
             Ok(())
@@ -276,16 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn merge_is_named_after_the_first_file() {
+    fn output_goes_next_to_the_first_input() {
         let inputs = [
             PathBuf::from("dir/Chapter 1.pdf"),
             PathBuf::from("dir/Chapter 2.pdf"),
         ];
         assert_eq!(
-            merged_name(&inputs).unwrap(),
+            output_path("{stem} - merged.pdf", &inputs).unwrap(),
             Path::new("dir/Chapter 1 - merged.pdf")
         );
-        assert_eq!(merged_name(&[]), None);
+        assert!(output_path("{stem}.pdf", &[]).is_err());
     }
 
     #[test]

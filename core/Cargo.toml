@@ -25,7 +25,8 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-tauri-plugin-notification = "2"
+toml = "1.1.8"
+semver = "1.0.28"
 
 [target.'cfg(windows)'.dependencies]
 windows-numerics = "0.3"

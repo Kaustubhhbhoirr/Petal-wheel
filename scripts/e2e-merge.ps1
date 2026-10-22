@@ -1,6 +1,6 @@
 param([string]$Folder, [string[]]$Select, [int]$FlickDx = 0, [int]$FlickDy = -130,
       [byte[]]$Mods = @(0x11, 0x12), [byte]$Key = 0x20)
-# Drives the real gesture: Explorer selection -> hold Ctrl+Alt+Space -> flick -> release.
+# Drives the real gesture: Explorer selection -> hold the shortcut -> flick -> release.
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;

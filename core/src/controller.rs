@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::POINT;
@@ -14,50 +14,55 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+use crate::config::Config;
 use crate::hotkey::HotkeyEvent;
-use crate::jobs;
+use crate::jobs::{self, JobError};
 use crate::log::log;
 use crate::overlay::{Overlay, Placement, WheelContent};
+use crate::packs::Catalog;
 use crate::selection::{foreground_window, selected_paths, Selection};
-use crate::supervisor::{CancelToken, Limits};
-use crate::wheel::{hit_test, slices_for, Slice};
+use crate::supervisor::{CancelToken, SupervisorError};
+use crate::toast::{Toast, Toaster};
+use crate::wheel::{hit_test, Slice};
 
 /// How often the cursor is checked while the wheel is open (about 60 Hz).
 const TRACK_INTERVAL: Duration = Duration::from_millis(16);
 
-/// Something to tell the user, shown as a toast.
-#[derive(Debug, Clone)]
-pub struct Notice {
-    pub title: String,
-    pub body: String,
+/// State the controller shares with the Settings window, which can change it at any time.
+pub struct Shared {
+    pub catalog: RwLock<Catalog>,
+    pub config: RwLock<Config>,
 }
 
 pub struct Controller {
     overlay: Arc<dyn Overlay>,
+    shared: Arc<Shared>,
     jobs: Sender<Job>,
 }
 
 struct Job {
-    slice: Slice,
+    slice_id: String,
     paths: Vec<PathBuf>,
 }
 
 impl Controller {
-    /// Starts the controller and job threads. `notify` is called from the job thread.
+    /// Starts the controller and job threads.
     pub fn start(
         overlay: Arc<dyn Overlay>,
         events: Receiver<HotkeyEvent>,
-        worker_dir: PathBuf,
-        notify: impl Fn(Notice) + Send + 'static,
+        shared: Arc<Shared>,
+        toaster: Arc<dyn Toaster>,
     ) {
         let (jobs_tx, jobs_rx) = mpsc::channel();
+        let job_shared = shared.clone();
         std::thread::Builder::new()
             .name("flick-jobs".into())
-            .spawn(move || run_jobs(jobs_rx, worker_dir, notify))
+            .spawn(move || run_jobs(jobs_rx, job_shared, toaster))
             .expect("spawn job thread");
 
         let controller = Controller {
             overlay,
+            shared,
             jobs: jobs_tx,
         };
         std::thread::Builder::new()
@@ -83,9 +88,17 @@ impl Controller {
             Selection::default()
         });
         let selection_ms = ms(started.elapsed());
-        let slices = slices_for(&selection.paths);
+        let slices: Vec<Slice> = {
+            let catalog = self.shared.catalog.read().unwrap();
+            let config = self.shared.config.read().unwrap();
+            catalog
+                .slices_for(&selection.paths, &config.slices)
+                .into_iter()
+                .map(Slice::from)
+                .collect()
+        };
         let content = WheelContent {
-            caption: caption(&selection),
+            caption: caption(&selection, slices.is_empty()),
             slices: slices.clone(),
         };
         let placement = Placement {
@@ -130,63 +143,83 @@ impl Controller {
         }
         self.overlay.hide();
 
-        if let Some(slice) = highlighted.map(|i| slices[i].clone()) {
-            if slice.enabled {
-                let _ = self.jobs.send(Job {
-                    slice,
-                    paths: selection.paths,
+        if let Some(slice) = highlighted.map(|i| &slices[i]) {
+            let _ = self.jobs.send(Job {
+                slice_id: slice.id.clone(),
+                paths: selection.paths,
+            });
+        }
+    }
+}
+
+/// Runs jobs one at a time, so a weak PC never has two heavy conversions at once.
+fn run_jobs(jobs: Receiver<Job>, shared: Arc<Shared>, toaster: Arc<dyn Toaster>) {
+    while let Ok(job) = jobs.recv() {
+        // Copy what the job needs, so Settings can change the catalog while it runs.
+        let found = {
+            let catalog = shared.catalog.read().unwrap();
+            catalog
+                .find(&job.slice_id)
+                .map(|(pack, slice)| (pack.clone(), slice.clone()))
+        };
+        let Some((pack, slice)) = found else {
+            log(&format!("slice {} is no longer installed", job.slice_id));
+            continue;
+        };
+
+        let started = Instant::now();
+        let cancel = CancelToken::default();
+        toaster.show(Toast::Running {
+            title: format!("{}\u{2026}", slice.label),
+            detail: describe(&job.paths),
+            cancel: cancel.clone(),
+        });
+        match jobs::run_slice(&pack, &slice, &job.paths, &cancel) {
+            Ok(output) => {
+                log(&format!(
+                    "{} done in {:.0} ms: {}",
+                    slice.id,
+                    ms(started.elapsed()),
+                    output.display()
+                ));
+                toaster.show(Toast::Done {
+                    title: format!("{} done", slice.label),
+                    output,
+                });
+            }
+            Err(JobError::Supervisor(SupervisorError::Cancelled)) => {
+                log(&format!("{} cancelled", slice.id));
+                toaster.hide();
+            }
+            Err(e) => {
+                log(&format!("{} failed: {e}", slice.id));
+                toaster.show(Toast::Failed {
+                    title: format!("{} failed", slice.label),
+                    message: e.to_string(),
                 });
             }
         }
     }
 }
 
-/// Runs jobs one at a time, so a weak PC never has two heavy conversions at once.
-fn run_jobs(jobs: Receiver<Job>, worker_dir: PathBuf, notify: impl Fn(Notice)) {
-    let pdf_light = worker_dir.join("pdf-light.exe");
-    while let Ok(job) = jobs.recv() {
-        let started = Instant::now();
-        let result = match job.slice.id {
-            "pdf.merge" => jobs::merge_pdfs(
-                &pdf_light,
-                &job.paths,
-                &Limits::default(),
-                &CancelToken::default(),
-            ),
-            other => {
-                log(&format!("no handler for slice {other}"));
-                continue;
-            }
-        };
-        let notice = match result {
-            Ok(output) => {
-                log(&format!(
-                    "{} done in {:.0} ms: {}",
-                    job.slice.id,
-                    ms(started.elapsed()),
-                    output.display()
-                ));
-                Notice {
-                    title: format!("{} done", job.slice.label),
-                    body: format!(
-                        "Saved {}",
-                        output.file_name().unwrap_or_default().to_string_lossy()
-                    ),
-                }
-            }
-            Err(e) => {
-                log(&format!("{} failed: {e}", job.slice.id));
-                Notice {
-                    title: format!("{} failed", job.slice.label),
-                    body: e.to_string(),
-                }
-            }
-        };
-        notify(notice);
+/// "3 files in Notes", for the running toast.
+fn describe(paths: &[PathBuf]) -> String {
+    let folder = paths
+        .first()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.file_name())
+        .map(|n| format!(" in {}", n.to_string_lossy()))
+        .unwrap_or_default();
+    match paths {
+        [one] => one
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        many => format!("{} files{folder}", many.len()),
     }
 }
 
-fn caption(selection: &Selection) -> String {
+fn caption(selection: &Selection, no_slices: bool) -> String {
     let count = selection.paths.len();
     let pdfs = selection
         .paths
@@ -195,6 +228,7 @@ fn caption(selection: &Selection) -> String {
         .count();
     match count {
         0 => "Nothing selected".into(),
+        _ if no_slices => "No actions for this selection".into(),
         1 => selection.paths[0]
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

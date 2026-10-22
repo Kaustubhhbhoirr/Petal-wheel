@@ -22,7 +22,7 @@ pub struct Shortcut {
 
 impl Default for Shortcut {
     fn default() -> Self {
-        "Ctrl+Alt+Space".parse().expect("valid default shortcut")
+        "Ctrl+Shift+Q".parse().expect("valid default shortcut")
     }
 }
 
@@ -148,12 +148,12 @@ pub enum HotkeyEvent {
 }
 
 #[cfg(windows)]
-pub use listener::{HotkeyError, HotkeyListener};
+pub use listener::{HotkeyError, HotkeyListener, HotkeyManager};
 
 #[cfg(windows)]
 mod listener {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
@@ -278,6 +278,102 @@ mod listener {
         }
     }
 
+    /// Owns the active shortcut and lets it change while Flick runs. Every listener it starts
+    /// feeds the same channel, so the controller never notices a change.
+    pub struct HotkeyManager {
+        events: mpsc::Sender<HotkeyEvent>,
+        state: Mutex<ManagerState>,
+    }
+
+    #[derive(Default)]
+    struct ManagerState {
+        /// The shortcut the user chose, registered or not.
+        shortcut: Option<Shortcut>,
+        listener: Option<HotkeyListener>,
+        paused: bool,
+    }
+
+    impl HotkeyManager {
+        pub fn new(events: mpsc::Sender<HotkeyEvent>) -> Self {
+            Self {
+                events,
+                state: Mutex::new(ManagerState::default()),
+            }
+        }
+
+        fn listen(&self, shortcut: Shortcut) -> Result<HotkeyListener, HotkeyError> {
+            let events = self.events.clone();
+            HotkeyListener::start(shortcut, move |event| {
+                let _ = events.send(event);
+            })
+        }
+
+        /// Makes `shortcut` the active one. The new combo is registered before the old one is
+        /// released, so if it is taken the previous shortcut keeps working.
+        pub fn set(&self, shortcut: Shortcut) -> Result<(), HotkeyError> {
+            let mut state = self.state.lock().unwrap();
+            if state.shortcut == Some(shortcut) && (state.listener.is_some() || state.paused) {
+                return Ok(());
+            }
+            if state.shortcut == Some(shortcut) {
+                // Same combo, not registered (it was taken earlier): try again.
+                state.listener = Some(self.listen(shortcut)?);
+                return Ok(());
+            }
+            let listener = self.listen(shortcut)?;
+            state.shortcut = Some(shortcut);
+            state.listener = if state.paused {
+                None // dropping it unregisters; resume() registers it again
+            } else {
+                Some(listener)
+            };
+            Ok(())
+        }
+
+        /// Records `shortcut` as chosen without registering it, e.g. when it was taken at startup
+        /// and the user should pick another.
+        pub fn remember(&self, shortcut: Shortcut) {
+            self.state.lock().unwrap().shortcut = Some(shortcut);
+        }
+
+        pub fn current(&self) -> Option<Shortcut> {
+            self.state.lock().unwrap().shortcut
+        }
+
+        /// Whether the current shortcut is registered and working.
+        pub fn is_active(&self) -> bool {
+            self.state.lock().unwrap().listener.is_some()
+        }
+
+        /// Checks whether `shortcut` could be registered, without keeping it.
+        pub fn probe(&self, shortcut: Shortcut) -> Result<(), HotkeyError> {
+            {
+                let state = self.state.lock().unwrap();
+                if state.shortcut == Some(shortcut) && (state.listener.is_some() || state.paused) {
+                    return Ok(());
+                }
+            }
+            HotkeyListener::start(shortcut, |_| {}).map(HotkeyListener::stop)
+        }
+
+        /// Releases the shortcut while the Settings window records a new one, so pressing the
+        /// current combo there types it instead of opening the wheel.
+        pub fn pause(&self) {
+            let mut state = self.state.lock().unwrap();
+            state.paused = true;
+            state.listener = None;
+        }
+
+        pub fn resume(&self) -> Result<(), HotkeyError> {
+            let mut state = self.state.lock().unwrap();
+            state.paused = false;
+            if let (None, Some(shortcut)) = (&state.listener, state.shortcut) {
+                state.listener = Some(self.listen(shortcut)?);
+            }
+            Ok(())
+        }
+    }
+
     fn modifiers(shortcut: &Shortcut) -> HOT_KEY_MODIFIERS {
         let mut m = HOT_KEY_MODIFIERS(0);
         if shortcut.ctrl {
@@ -308,9 +404,9 @@ mod tests {
     #[test]
     fn parses_and_prints_the_default() {
         let s = Shortcut::default();
-        assert!(s.ctrl && s.alt && !s.shift && !s.win);
-        assert_eq!(s.vk, 0x20);
-        assert_eq!(s.to_string(), "Ctrl+Alt+Space");
+        assert!(s.ctrl && !s.alt && s.shift && !s.win);
+        assert_eq!(s.vk, 0x51);
+        assert_eq!(s.to_string(), "Ctrl+Shift+Q");
     }
 
     #[test]
