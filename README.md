@@ -1,8 +1,8 @@
-# Flick: free, offline file tools in a radial menu for Windows.
+# Petal: free, offline PDF and file tools in a radial menu for Windows.
 
 Select a file, press a shortcut, flick to an action. No uploads, no ads, no subscriptions, no internet.
 
-> **Status:** v0.5 alpha in progress. Packs, a Settings window and Flick's own progress toast work
+> **Status:** v0.5 alpha in progress. Packs, a Settings window and Petal's own progress toast work
 > on Windows 11, with the actions listed below. Spike measurements are in
 > [docs/spike-results.md](docs/spike-results.md). Not ready for daily use yet.
 
@@ -39,13 +39,13 @@ are refused with a clear message.
 ## Why
 
 Merging chapter notes, compressing a PDF for a portal upload limit, or turning photos into a PDF should
-not need a website that wants your file, an ad view, or a subscription. Flick does it locally, in one
+not need a website that wants your file, an ad view, or a subscription. Petal does it locally, in one
 gesture, and runs well on a Core i3 with 4 GB of RAM.
 
 ## Architecture
 
 ```
-Flick core (Rust + Tauri 2)        idle: ~0% CPU
+Petal core (Rust + Tauri 2)        idle: ~0% CPU
   hotkey · Explorer selection · wheel overlay · tray · job supervisor
           | JSON over stdin/stdout
   worker processes, one per job, each in its own Windows Job Object
@@ -77,7 +77,7 @@ cargo test --workspace
 cargo run -p flick-core
 ```
 
-If another app already owns the shortcut, Flick shows a toast with a **Change shortcut** button that
+If another app already owns the shortcut, Petal shows a toast with a **Change shortcut** button that
 opens Settings. Problems are also logged to `%LOCALAPPDATA%\Flick\flick.log`. For a one-off run with a
 different shortcut (not saved):
 
